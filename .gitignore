@@ -1,0 +1,7 @@
+.idea/
+.tmp.driveupload/
+data/
+results/
+.venv/
+.vscode/
+results/

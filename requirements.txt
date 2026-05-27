@@ -1,0 +1,17 @@
+ultralytics>=8.0.0
+opencv-python
+Pillow
+pycocotools
+matplotlib
+seaborn
+pandas
+numpy
+tqdm
+jupyter
+scikit-learn
+ipykernel
+scikit-multilearn
+# --- Stage 2 (Classification) ---
+torch>=2.0.0
+torchvision>=0.15.0
+timm>=0.9.0
