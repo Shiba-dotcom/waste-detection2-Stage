@@ -4,15 +4,6 @@ import os
 import shutil
 from pathlib import Path
 
-# ═══════════════════════════════════════════════════════════════════
-# CHE DO BINARY (2-Stage Pipeline)
-# ═══════════════════════════════════════════════════════════════════
-# True  = Gop tat ca class thanh 1 class "Waste" (cho Stage 1 Detection)
-#          Output: data/processed_binary/
-# False = Giu nguyen 5 classes (Glass, Metal, Other, Paper, Plastic)
-#          Output: data/processed/
-BINARY_MODE = True
-
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 # Uu tien dung file da lam sach, fallback sang file goc
@@ -27,107 +18,93 @@ else:
     print("[WARN] Khong tim thay annotations_cleaned.json, dung file goc")
     print("       Hay chay 'python src/data_cleaning.py' truoc!")
 
-mode_str = "BINARY (1 class: Waste)" if BINARY_MODE else "MULTI-CLASS (5 classes)"
-print(f"[INFO] Che do: {mode_str}")
-
 with open(ann_path, "r") as f:
     data = json.load(f)
 
 mapping_df = pd.read_csv(BASE_DIR / "src" / "meta" / "mapping.csv")
 mapping = dict(zip(mapping_df["name"], mapping_df["group"]))
 
-
 idtn = {c["id"]: c["name"] for c in data["categories"]}
-
-# Chon thu muc output tuy theo che do
-if BINARY_MODE:
-    base_out = str(BASE_DIR / "data" / "processed_binary")
-else:
-    base_out = str(BASE_DIR / "data" / "processed")
-
-img_out = os.path.join(base_out, "images") # Thư mục chứa file hình
-label_out = os.path.join(base_out, "labels") # Thư mục chứa file annotation (định dạng txt)
-
-if os.path.exists(base_out):
-    shutil.rmtree(base_out)
-
-
-os.makedirs(img_out, exist_ok=True)
-os.makedirs(label_out, exist_ok=True)
-
-# Thiet lap classes tuy theo che do
-if BINARY_MODE:
-    # Chi 1 class duy nhat
-    classes = ["Waste"]
-    class2id = {"Waste": 0}
-else:
-    classes = sorted(set(mapping.values()))
-    class2id = {c: i for i, c in enumerate(classes)}
-
-
-
 img_map = {img["id"]: img for img in data["images"]}
-
 raw_img_dir = str(BASE_DIR / "data" / "raw")
 
-for img_id, img in img_map.items():
-    src = os.path.join(raw_img_dir, img["file_name"])
-    dst = os.path.join(img_out, img["file_name"])
-    
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    
-    shutil.copy(src, dst)
+# ═══════════════════════════════════════════════════════════════════
+# CHẠY CẢ 2 CHẾ ĐỘ CÙNG LÚC (2-Stage Pipeline)
+# ═══════════════════════════════════════════════════════════════════
+# Vòng lặp chạy 2 lần:
+# Lần 1 (False): Tạo data/processed/ (5 classes) -> Phục vụ Stage 2 cắt ảnh.
+# Lần 2 (True):  Tạo data/processed_binary/ (1 class Waste) -> Phục vụ Stage 1 YOLO.
 
+for BINARY_MODE in [False, True]:
+    mode_str = "BINARY (1 class: Waste)" if BINARY_MODE else "MULTI-CLASS (5 classes)"
+    print(f"\n[INFO] Đang xử lý chế độ: {mode_str}...")
 
-for ann in data["annotations"]:
-    img_id = ann["image_id"]
-    img_info = img_map[img_id]
-
-    img_name = os.path.splitext(img_info["file_name"])[0]
-
-    # [9] Mapping lại nhãn
-    cat_name = idtn[ann["category_id"]]
-    label = mapping.get(cat_name, "Other")
-
-    # Trong BINARY_MODE: tat ca deu la class 0 ("Waste")
+    # Chon thu muc output tuy theo che do
     if BINARY_MODE:
-        class_id = 0
+        base_out = str(BASE_DIR / "data" / "processed_binary")
+        classes = ["Waste"]
+        class2id = {"Waste": 0}
     else:
-        class_id = class2id[label]
+        base_out = str(BASE_DIR / "data" / "processed")
+        classes = sorted(set(mapping.values()))
+        class2id = {c: i for i, c in enumerate(classes)}
 
-    x, y, w, h = ann["bbox"]
+    img_out = os.path.join(base_out, "images") 
+    label_out = os.path.join(base_out, "labels") 
 
-    img_w, img_h = img_info["width"], img_info["height"]
+    if os.path.exists(base_out):
+        shutil.rmtree(base_out)
 
-    # [8] Chuyển annotation (định dạng COCO) sang format YOLO
-    x_center = (x + w / 2) / img_w
-    y_center = (y + h / 2) / img_h
-    w_norm = w / img_w
-    h_norm = h / img_h
-    
-    txt_path = os.path.join(label_out, f"{img_name}.txt")
+    os.makedirs(img_out, exist_ok=True)
+    os.makedirs(label_out, exist_ok=True)
 
-    os.makedirs(os.path.dirname(txt_path), exist_ok=True)
+    # 1. Copy hình ảnh
+    print("       Đang copy hình ảnh...")
+    for img_id, img in img_map.items():
+        src = os.path.join(raw_img_dir, img["file_name"])
+        dst = os.path.join(img_out, img["file_name"])
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy(src, dst)
 
-    with open(txt_path, "a") as f:
-        f.write(f"{class_id} {x_center} {y_center} {w_norm} {h_norm}\n")
+    # 2. Tạo nhãn (Labels)
+    print("       Đang tạo file nhãn YOLO...")
+    for ann in data["annotations"]:
+        img_id = ann["image_id"]
+        img_info = img_map[img_id]
+        img_name = os.path.splitext(img_info["file_name"])[0]
 
+        cat_name = idtn[ann["category_id"]]
+        label = mapping.get(cat_name, "Other")
 
-yaml_path = os.path.join(base_out, "dataset.yaml")
+        if BINARY_MODE:
+            class_id = 0
+        else:
+            class_id = class2id[label]
 
-with open(yaml_path, "w") as f:
-    f.write(f"""
-path: {base_out}
-train: images/train
-val: images/val
-test: images/test
+        x, y, w, h = ann["bbox"]
+        img_w, img_h = img_info["width"], img_info["height"]
 
-names:
-""")
-    for i, c in enumerate(classes):
-        f.write(f"  {i}: {c}\n")
+        x_center = (x + w / 2) / img_w
+        y_center = (y + h / 2) / img_h
+        w_norm = w / img_w
+        h_norm = h / img_h
+        
+        txt_path = os.path.join(label_out, f"{img_name}.txt")
+        os.makedirs(os.path.dirname(txt_path), exist_ok=True)
 
-print(f"Da xu ly xong ({mode_str}).")
+        with open(txt_path, "a") as f:
+            f.write(f"{class_id} {x_center} {y_center} {w_norm} {h_norm}\n")
+
+    # 3. Tạo file dataset.yaml
+    yaml_path = os.path.join(base_out, "dataset.yaml")
+    with open(yaml_path, "w") as f:
+        f.write(f"path: {base_out}\ntrain: images/train\nval: images/val\ntest: images/test\n\nnames:\n")
+        for i, c in enumerate(classes):
+            f.write(f"  {i}: {c}\n")
+
+    print(f"       => Đã xử lý xong ({mode_str}).")
+
+print("\n[HOÀN TẤT] Cả 2 bộ dữ liệu đã được tạo thành công!")
 
 
 

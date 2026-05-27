@@ -47,9 +47,9 @@ if ON_KAGGLE:
     DATASET_YAML = DATA_DIR / "dataset.yaml"
     PROJECT_DIR = Path("/kaggle/working/yolo_runs")
 else:
-    # Local: dùng thư mục processed_binary_tiled đã có sẵn
+    # Local: dùng thư mục processed_binary đã có sẵn (không dùng tiling cho Lần 1)
     BASE_DIR     = Path(__file__).resolve().parents[1]
-    DATA_DIR     = BASE_DIR / "data" / "processed_binary_tiled"
+    DATA_DIR     = BASE_DIR / "data" / "processed_binary"
     DATASET_YAML = DATA_DIR / "dataset.yaml"
     PROJECT_DIR  = BASE_DIR / "results" / "yolo_runs"
 

@@ -29,7 +29,9 @@ from collections import Counter
 random.seed(42)
 
 # --- Phat hien moi truong ---
-ON_KAGGLE = os.path.exists("/kaggle/input")
+# Chú ý: Ép buộc bằng False vì chúng ta đã chép toàn bộ data vào Working Dir trên Kaggle,
+# do đó cấu trúc thư mục giờ đây y hệt như Local.
+ON_KAGGLE = False
 
 if ON_KAGGLE:
     # Tren Kaggle: dataset TACO crops da upload len
