@@ -6,7 +6,7 @@ from skmultilearn.model_selection import iterative_train_test_split
 # ======================================
 # config
 # ======================================
-base = Path("../../data/processed")
+base = Path(__file__).resolve().parents[2] / "data" / "processed"
 
 img_root = base / "images"
 label_root = base / "labels"
