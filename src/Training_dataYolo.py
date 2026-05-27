@@ -11,7 +11,7 @@ from pathlib import Path
 #          Output: data/processed_binary/
 # False = Giu nguyen 5 classes (Glass, Metal, Other, Paper, Plastic)
 #          Output: data/processed/
-BINARY_MODE = False
+BINARY_MODE = True
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
