@@ -53,14 +53,16 @@ if torch.cuda.is_available():
 # ============================================================
 # Chuyển ON_KAGGLE = True khi chạy trên Kaggle Notebook.
 
-ON_KAGGLE = False
+# Tự động phát hiện môi trường, hoặc đọc biến môi trường ON_KAGGLE=1
+import os as _os
+ON_KAGGLE = _os.environ.get("ON_KAGGLE", "0") == "1" or _os.path.exists("/kaggle/working")
 
 if ON_KAGGLE:
-    DATA_DIR    = Path("/kaggle/input/waste-classification-merged")
-    OUTPUT_DIR  = Path("/kaggle/working/classifier_runs")
+    DATA_DIR    = Path("/kaggle/working/waste-detection2-Stage/data/classification_merged")
+    OUTPUT_DIR  = Path("/kaggle/working/waste-detection2-Stage/results/classifier_runs")
 else:
     BASE_DIR    = Path(__file__).resolve().parents[1]
-    DATA_DIR    = BASE_DIR / "data" / "classification"
+    DATA_DIR    = BASE_DIR / "data" / "classification_merged"  # Dùng tập đã trộn (có TrashNet, RealWaste & Background)
     OUTPUT_DIR  = BASE_DIR / "results" / "classifier_runs"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

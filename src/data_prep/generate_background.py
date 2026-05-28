@@ -26,7 +26,9 @@ from tqdm import tqdm
 random.seed(42)
 np.random.seed(42)
 
-ON_KAGGLE = False
+# Tự động phát hiện môi trường
+import os as _os
+ON_KAGGLE = _os.environ.get("ON_KAGGLE", "0") == "1" or _os.path.exists("/kaggle/working")
 
 if ON_KAGGLE:
     BINARY_DIR = Path("/kaggle/working/waste-detection2-Stage/data/processed_binary")

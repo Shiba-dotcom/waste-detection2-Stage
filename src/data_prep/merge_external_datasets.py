@@ -31,16 +31,18 @@ random.seed(42)
 # --- Phat hien moi truong ---
 # Chú ý: Ép buộc bằng False vì chúng ta đã chép toàn bộ data vào Working Dir trên Kaggle,
 # do đó cấu trúc thư mục giờ đây y hệt như Local.
-ON_KAGGLE = False
+# Tự động phát hiện môi trường
+import os as _os
+ON_KAGGLE = _os.environ.get("ON_KAGGLE", "0") == "1" or _os.path.exists("/kaggle/working")
 
 if ON_KAGGLE:
-    # Tren Kaggle: dataset TACO crops da upload len
-    TACO_CROPS_DIR = Path("/kaggle/input/waste-classification-taco/classification")
-    # Dataset ngoai
-    TRASHNET_DIR = Path("/kaggle/input/trashnet/dataset-resized/dataset-resized")
-    REALWASTE_DIR = Path("/kaggle/input/realwaste-image-classification/RealWaste")
+    # Tren Kaggle: TACO crops duợc tạo ra bởi crop_for_classification.py
+    TACO_CROPS_DIR = Path("/kaggle/working/waste-detection2-Stage/data/classification")
+    # Dataset ngoài
+    TRASHNET_DIR = Path("/kaggle/working/waste-detection2-Stage/data/external/TrashNet")
+    REALWASTE_DIR = Path("/kaggle/working/waste-detection2-Stage/data/external/RealWaste")
     # Output: gop tat ca vao day
-    OUTPUT_DIR = Path("/kaggle/working/classification_merged")
+    OUTPUT_DIR = Path("/kaggle/working/waste-detection2-Stage/data/classification_merged")
 else:
     # Chay local
     BASE_DIR = Path(__file__).resolve().parents[2]
