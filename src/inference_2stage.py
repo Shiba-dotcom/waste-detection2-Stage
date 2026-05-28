@@ -25,11 +25,12 @@ from ultralytics import YOLO
 # Cấu hình & Hàm hỗ trợ
 # ============================================================
 
-# Class mapping của dự án
-CLASS_NAMES = {0: 'Glass', 1: 'Metal', 2: 'Other', 3: 'Paper', 4: 'Plastic'}
+# Class mapping của dự án (thêm Background)
+CLASS_NAMES = {0: 'Background', 1: 'Glass', 2: 'Metal', 3: 'Other', 4: 'Paper', 5: 'Plastic'}
 
 # Bảng màu (BGR cho OpenCV)
 COLORS = {
+    'Background': (128, 128, 128), # Gray (nếu muốn debug)
     'Glass': (54, 67, 244),   # Red
     'Metal': (243, 150, 33),  # Blue
     'Other': (0, 152, 255),   # Orange
@@ -39,7 +40,7 @@ COLORS = {
 
 def load_classifier(weights_path, device):
     """Khởi tạo và load trọng số cho model Classification (EfficientNet-B2)."""
-    model = timm.create_model('efficientnet_b2', num_classes=5)
+    model = timm.create_model('efficientnet_b2', num_classes=6)
     
     if weights_path.exists():
         checkpoint = torch.load(weights_path, map_location=device)
@@ -150,6 +151,13 @@ class TwoStageDetector:
                 cls_conf = probs[cls_idx].item()
                 
             cls_name = CLASS_NAMES[cls_idx]
+            
+            # --- [MỚI] Lọc False Positives ---
+            # Nếu model phân loại đây là Background (không phải rác),
+            # chúng ta sẽ âm thầm bỏ qua bounding box này.
+            if cls_name == 'Background':
+                continue
+                
             predictions.append({
                 'box': box,
                 'class_id': cls_idx,

@@ -65,21 +65,29 @@ else:
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# ----- Tên 5 lớp (thứ tự quan trọng – phải khớp với ImageFolder) -----
-CLASS_NAMES = ["Glass", "Metal", "Other", "Paper", "Plastic"]
+# ----- Tên 6 lớp (thứ tự quan trọng – phải khớp với ImageFolder chữ cái đầu) -----
+CLASS_NAMES = ["Background", "Glass", "Metal", "Other", "Paper", "Plastic"]
 NUM_CLASSES = len(CLASS_NAMES)
 
 # ----- Siêu tham số -----
 IMG_SIZE       = 224          # EfficientNet-B2 input size chuẩn
 BATCH_SIZE     = 32
-EPOCHS         = 50
-LEARNING_RATE  = 1e-4         # AdamW lr – thấp hơn cho fine-tuning pretrained
-WEIGHT_DECAY   = 1e-4
+EPOCHS         = 60           # Tăng lên để bù cho 2 giai đoạn train
 NUM_WORKERS    = 4
 SEED           = 42
 
+# ----- 2-Phase Training (chống Overfitting) -----
+# Giai đoạn 1: Freeze backbone → chỉ train head (nhanh, ổn định)
+# Giai đoạn 2: Unfreeze toàn bộ → fine-tune với LR thấp hơn
+PHASE1_EPOCHS  = 10           # Số epoch train với backbone đóng băng
+PHASE1_LR      = 5e-4         # LR cao hơn khi chỉ train head
+PHASE2_LR      = 5e-5         # LR rất thấp khi fine-tune toàn bộ
+WEIGHT_DECAY   = 3e-4         # Tăng L2 regularization (gốc: 1e-4)
+DROPOUT_RATE   = 0.4          # Dropout trước classifier head
+LABEL_SMOOTHING = 0.1         # Tránh model quá tự tin
+EARLY_STOP_PATIENCE = 12      # Dừng sớm nếu val_loss không cải thiện
+
 # ----- Giới hạn mẫu Plastic (xử lý imbalance) -----
-# Plastic thường chiếm đa số → cap lại để tránh model thiên lệch.
 PLASTIC_CAP    = 2500
 
 # Đặt seed cho reproducibility
@@ -94,25 +102,29 @@ print(f"[INFO] Data  : {DATA_DIR}")
 
 # %%
 # ============================================================
-# Cell 3: Định nghĩa Data Augmentation
+# Cell 3: Định nghĩa Data Augmentation (Tăng cường chống Overfitting)
 # ============================================================
-# Train: augmentation mạnh để tăng tính tổng quát.
-#   - RandomResizedCrop: crop ngẫu nhiên, buộc model học nhiều tỷ lệ.
-#   - ColorJitter: thay đổi ánh sáng, tương phản – mô phỏng điều kiện thực tế.
-#   - RandomRotation(15): xoay nhẹ, rác có thể nằm ở mọi góc.
-# Val/Test: chỉ resize + center crop, KHÔNG augment (đánh giá công bằng).
-# Normalize: dùng ImageNet mean/std vì model pretrained trên ImageNet.
+# Augmentation mạnh hơn để buộc model học feature tổng quát:
+#   - RandAugment: tự động chọn & kết hợp phép augment tối ưu
+#   - RandomErasing: xóa ngẫu nhiên 1 vùng ảnh → tránh học vị trí cố định
+#   - RandomVerticalFlip: rác nằm ở mọi hướng trong thực tế
+#   - scale=(0.6, 1.0): crop aggressively hơn (gốc: 0.8-1.0)
+# Val/Test: chỉ resize + center crop, KHÔNG augment.
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD  = [0.229, 0.224, 0.225]
 
 train_transforms = transforms.Compose([
-    transforms.RandomResizedCrop(IMG_SIZE, scale=(0.8, 1.0)),
+    transforms.RandomResizedCrop(IMG_SIZE, scale=(0.6, 1.0)),  # Crop aggressively hơn
     transforms.RandomHorizontalFlip(p=0.5),
-    transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2),
-    transforms.RandomRotation(15),
+    transforms.RandomVerticalFlip(p=0.2),                      # [MỚI] Rác có thể lật dọc
+    transforms.ColorJitter(brightness=0.4, contrast=0.4,       # Mạnh hơn (gốc: 0.3)
+                           saturation=0.3, hue=0.1),
+    transforms.RandomRotation(30),                             # Xoay rộng hơn (gốc: 15°)
+    transforms.RandAugment(num_ops=2, magnitude=9),            # [MỚI] Auto augmentation
     transforms.ToTensor(),
     transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+    transforms.RandomErasing(p=0.3, scale=(0.02, 0.2)),        # [MỚI] Xóa vùng ngẫu nhiên
 ])
 
 eval_transforms = transforms.Compose([
@@ -121,6 +133,13 @@ eval_transforms = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
 ])
+
+print("[INFO] Augmentation đã được tăng cường:")
+print("  + RandAugment(num_ops=2, magnitude=9)")
+print("  + RandomVerticalFlip(p=0.2)")
+print("  + RandomErasing(p=0.3)")
+print("  + ColorJitter mạnh hơn (brightness/contrast 0.4)")
+print("  + RandomRotation(30°)")
 
 # %%
 # ============================================================
@@ -284,39 +303,50 @@ print(f"  Test  batches       : {len(test_loader)}")
 
 # %%
 # ============================================================
-# Cell 5: Xây dựng Model – EfficientNet-B2
+# Cell 5: Xây dựng Model – EfficientNet-B2 + Dropout
 # ============================================================
-# Sử dụng timm để load EfficientNet-B2 pretrained trên ImageNet.
-# Thay thế classifier head cuối cùng cho 5 lớp rác.
-# EfficientNet-B2 có 9.1M params, cân bằng giữa accuracy và tốc độ.
+# Cải tiến so với phiên bản gốc:
+#   1. Thêm Dropout(p=0.4) trước classifier head → L2 regularization
+#   2. Backbone sẽ bị đóng băng ở Giai đoạn 1 (Phase 1)
 
 model = timm.create_model("efficientnet_b2", pretrained=True)
 
-# Lấy số features của lớp cuối cùng để thay thế
+# Thay classifier head: Linear → Dropout + Linear
 in_features = model.classifier.in_features
-model.classifier = nn.Linear(in_features, NUM_CLASSES)
+model.classifier = nn.Sequential(
+    nn.Dropout(p=DROPOUT_RATE),          # [MỚI] Dropout chống overfitting
+    nn.Linear(in_features, NUM_CLASSES)
+)
 
 model = model.to(DEVICE)
 
-# Tổng số params
-total_params    = sum(p.numel() for p in model.parameters())
+# Đóng băng backbone cho Giai đoạn 1
+def freeze_backbone(model):
+    """Đóng băng toàn bộ trừ classifier head."""
+    for name, param in model.named_parameters():
+        if "classifier" not in name:
+            param.requires_grad = False
+
+def unfreeze_all(model):
+    """Mở khóa toàn bộ model."""
+    for param in model.parameters():
+        param.requires_grad = True
+
+freeze_backbone(model)  # Bắt đầu với backbone bị đóng băng
+
+# Thống kê params
+total_params     = sum(p.numel() for p in model.parameters())
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f"[INFO] EfficientNet-B2")
+frozen_params    = total_params - trainable_params
+
+print(f"[INFO] EfficientNet-B2 (Phase 1 – Frozen backbone)")
 print(f"  Tổng params      : {total_params:>12,}")
-print(f"  Trainable params : {trainable_params:>12,}")
-print(f"  Classifier head  : {in_features} → {NUM_CLASSES}")
+print(f"  Trainable params : {trainable_params:>12,}  (chỉ classifier head)")
+print(f"  Frozen params    : {frozen_params:>12,}  (backbone)")
+print(f"  Classifier head  : Dropout({DROPOUT_RATE}) → Linear({in_features} → {NUM_CLASSES})")
 
 # %%
 # ============================================================
-# Cell 6: Loss, Optimizer, Scheduler
-# ============================================================
-# CrossEntropyLoss có class weights → phạt nặng hơn khi sai lớp thiểu số.
-# AdamW: Adam + weight decay decoupled – tốt cho fine-tuning.
-# CosineAnnealingLR: lr giảm theo hình cos, giúp thoát local minima.
-
-criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
 # Mixed precision – tăng tốc 1.5-2x trên GPU (T4, P100, V100...)
 # GradScaler giúp tránh underflow khi dùng FP16.
@@ -329,13 +359,13 @@ print(f"[INFO] AMP       : {'Enabled' if torch.cuda.is_available() else 'Disable
 
 # %%
 # ============================================================
-# Cell 7: Training Loop
+# Cell 7: Training Loop – 2 Giai đoạn + Early Stopping
 # ============================================================
-# Vòng lặp huấn luyện chính:
-#   - Mỗi epoch: train → validate → log metrics → save best
-#   - Mixed precision (AMP) cho tốc độ
-#   - tqdm progress bar cho mỗi batch
-#   - Track best model theo val accuracy
+# GIAI ĐOẠN 1 (Phase 1): Backbone FROZEN, chỉ train head
+#   → LR cao hơn, hội tụ nhanh, không phá vỡ pretrained weights
+# GIAI ĐOẠN 2 (Phase 2): Unfreeze toàn bộ, fine-tune với LR rất thấp
+#   → Tinh chỉnh toàn bộ model theo domain rác
+# EARLY STOPPING: dừng nếu val_loss không cải thiện sau N epoch
 
 
 def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
@@ -352,28 +382,22 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
 
         optimizer.zero_grad()
 
-        # Forward pass với mixed precision
         with torch.amp.autocast("cuda", enabled=torch.cuda.is_available()):
             outputs = model(images)
             loss = criterion(outputs, labels)
 
-        # Backward pass
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
-        # Thống kê
         running_loss += loss.item() * images.size(0)
         _, predicted = outputs.max(1)
         total   += labels.size(0)
         correct += predicted.eq(labels).sum().item()
 
-        # Cập nhật progress bar
         pbar.set_postfix(loss=f"{loss.item():.4f}", acc=f"{correct/total:.4f}")
 
-    avg_loss = running_loss / total
-    accuracy = correct / total
-    return avg_loss, accuracy
+    return running_loss / total, correct / total
 
 
 @torch.no_grad()
@@ -403,115 +427,161 @@ def evaluate(model, loader, criterion, device):
         all_preds.extend(predicted.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
 
-    avg_loss = running_loss / total
-    accuracy = correct / total
-    return avg_loss, accuracy, np.array(all_preds), np.array(all_labels)
+    return running_loss / total, correct / total, np.array(all_preds), np.array(all_labels)
 
 
-# --------- Main Training Loop ---------
+# ─────────────── Main Training Loop ───────────────
 print("\n" + "=" * 70)
-print("  BẮT ĐẦU HUẤN LUYỆN")
+print(f"  BẮT ĐẦU HUẤN LUYỆN 2 GIAI ĐOẠN")
+print(f"  Phase 1: epoch  1 → {PHASE1_EPOCHS} (backbone FROZEN,   lr={PHASE1_LR:.0e})")
+print(f"  Phase 2: epoch {PHASE1_EPOCHS+1} → {EPOCHS}  (backbone UNFROZEN, lr={PHASE2_LR:.0e})")
 print("=" * 70)
 
-best_val_acc  = 0.0
-best_epoch    = 0
+best_val_acc   = 0.0
+best_val_loss  = float("inf")
+best_epoch     = 0
 best_model_wts = copy.deepcopy(model.state_dict())
+early_stop_counter = 0
+phase = 1
 
-# Lưu lịch sử metrics để vẽ biểu đồ
 history = {
     "train_loss": [], "train_acc": [],
     "val_loss":   [], "val_acc":   [],
-    "lr": [],
+    "lr": [], "phase": [],
 }
 
 start_time = time.time()
 
 for epoch in range(1, EPOCHS + 1):
     epoch_start = time.time()
-    current_lr  = optimizer.param_groups[0]["lr"]
 
-    print(f"\nEpoch {epoch}/{EPOCHS}  (lr={current_lr:.2e})")
+    # ── Chuyển sang Phase 2 ──
+    if epoch == PHASE1_EPOCHS + 1 and phase == 1:
+        phase = 2
+        print(f"\n{'━'*70}")
+        print(f"  🔓 PHASE 2: Unfreeze toàn bộ backbone – Fine-tune với lr={PHASE2_LR:.0e}")
+        print(f"{'━'*70}")
+        unfreeze_all(model)
+        # Reset optimizer với LR thấp hơn cho toàn bộ params
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=PHASE2_LR,
+            weight_decay=WEIGHT_DECAY
+        )
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=(EPOCHS - PHASE1_EPOCHS)
+        )
+        early_stop_counter = 0  # Reset Early Stopping khi chuyển phase
+        best_val_loss = float("inf")
+
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"  Trainable params: {trainable:,}")
+
+    current_lr = optimizer.param_groups[0]["lr"]
+    phase_label = "🧊 P1" if phase == 1 else "🔥 P2"
+    print(f"\nEpoch {epoch:>3}/{EPOCHS}  {phase_label}  lr={current_lr:.2e}")
     print("-" * 50)
 
-    # --- Train ---
+    # ── Train & Validate ──
     train_loss, train_acc = train_one_epoch(
         model, train_loader, criterion, optimizer, scaler, DEVICE
     )
-
-    # --- Validate ---
     val_loss, val_acc, _, _ = evaluate(
         model, val_loader, criterion, DEVICE
     )
-
-    # --- Scheduler step ---
     scheduler.step()
 
-    # --- Log ---
     epoch_time = time.time() - epoch_start
+
+    # ── Log ──
     history["train_loss"].append(train_loss)
     history["train_acc"].append(train_acc)
     history["val_loss"].append(val_loss)
     history["val_acc"].append(val_acc)
     history["lr"].append(current_lr)
+    history["phase"].append(phase)
 
-    print(f"  Train Loss: {train_loss:.4f}  |  Train Acc: {train_acc:.4f}")
-    print(f"  Val   Loss: {val_loss:.4f}  |  Val   Acc: {val_acc:.4f}")
-    print(f"  Time: {epoch_time:.1f}s")
+    gap = train_acc - val_acc
+    print(f"  Train: loss={train_loss:.4f}  acc={train_acc:.4f}")
+    print(f"  Val  : loss={val_loss:.4f}  acc={val_acc:.4f}  (gap={gap:+.4f})")
+    print(f"  Time : {epoch_time:.1f}s")
 
-    # --- Save best model ---
+    # ── Lưu best model (theo val_acc) ──
     if val_acc > best_val_acc:
-        best_val_acc  = val_acc
-        best_epoch    = epoch
+        best_val_acc   = val_acc
+        best_epoch     = epoch
         best_model_wts = copy.deepcopy(model.state_dict())
         print(f"  ★ New best! Val Acc = {val_acc:.4f}")
+
+    # ── Early Stopping (theo val_loss) ──
+    if val_loss < best_val_loss - 1e-4:   # Cải thiện đáng kể
+        best_val_loss = val_loss
+        early_stop_counter = 0
+    else:
+        early_stop_counter += 1
+        print(f"  ⏳ Early stop counter: {early_stop_counter}/{EARLY_STOP_PATIENCE}")
+        if early_stop_counter >= EARLY_STOP_PATIENCE:
+            print(f"\n  🛑 Early Stopping! Val loss không cải thiện sau {EARLY_STOP_PATIENCE} epoch.")
+            print(f"     Dừng tại epoch {epoch}, best model tại epoch {best_epoch}.")
+            break
 
 total_time = time.time() - start_time
 print(f"\n{'=' * 70}")
 print(f"  HOÀN TẤT HUẤN LUYỆN")
-print(f"  Tổng thời gian : {total_time/60:.1f} phút")
+print(f"  Tổng thời gian  : {total_time/60:.1f} phút")
 print(f"  Best epoch      : {best_epoch}")
 print(f"  Best val acc    : {best_val_acc:.4f}")
+print(f"  Kết thúc epoch  : {epoch}")
 print(f"{'=' * 70}")
 
 # %%
 # ============================================================
-# Cell 8: Vẽ biểu đồ Training Curves
+# Cell 8: Vẽ biểu đồ Training Curves (có đánh dấu Phase 1/2)
 # ============================================================
 
+actual_epochs = len(history["train_loss"])
+epochs_range  = range(1, actual_epochs + 1)
+
 fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-fig.suptitle("EfficientNet-B2 Classifier – Training Curves", fontsize=14, fontweight="bold")
-epochs_range = range(1, EPOCHS + 1)
+fig.suptitle("EfficientNet-B2 Classifier – Training Curves (2-Phase + Early Stopping)",
+             fontsize=13, fontweight="bold")
+
+# Đường phân cách Phase 1 / Phase 2
+def mark_phase(ax):
+    if PHASE1_EPOCHS < actual_epochs:
+        ax.axvline(x=PHASE1_EPOCHS, color="purple", linestyle=":",
+                   alpha=0.7, linewidth=1.5, label=f"Phase 2 bắt đầu (epoch {PHASE1_EPOCHS})")
+    ax.axvline(x=best_epoch, color="red", linestyle="--",
+               alpha=0.6, linewidth=1.5, label=f"Best (epoch {best_epoch})")
 
 # --- Loss ---
 ax = axes[0]
 ax.plot(epochs_range, history["train_loss"], label="Train Loss", color="tab:blue")
 ax.plot(epochs_range, history["val_loss"],   label="Val Loss",   color="tab:orange")
-ax.axvline(x=best_epoch, color="red", linestyle="--", alpha=0.5, label=f"Best (epoch {best_epoch})")
-ax.set_xlabel("Epoch")
-ax.set_ylabel("Loss")
-ax.set_title("Loss")
-ax.legend()
-ax.grid(True, alpha=0.3)
+mark_phase(ax)
+ax.set_xlabel("Epoch"); ax.set_ylabel("Loss"); ax.set_title("Loss")
+ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
 
-# --- Accuracy ---
+# --- Accuracy + Overfitting Gap ---
 ax = axes[1]
 ax.plot(epochs_range, history["train_acc"], label="Train Acc", color="tab:blue")
 ax.plot(epochs_range, history["val_acc"],   label="Val Acc",   color="tab:orange")
-ax.axvline(x=best_epoch, color="red", linestyle="--", alpha=0.5, label=f"Best (epoch {best_epoch})")
-ax.set_xlabel("Epoch")
-ax.set_ylabel("Accuracy")
-ax.set_title("Accuracy")
-ax.legend()
-ax.grid(True, alpha=0.3)
+# Tô màu vùng gap (overfitting)
+ax.fill_between(epochs_range, history["val_acc"], history["train_acc"],
+                alpha=0.15, color="red", label="Overfitting gap")
+mark_phase(ax)
+ax.set_xlabel("Epoch"); ax.set_ylabel("Accuracy"); ax.set_title("Accuracy & Overfitting Gap")
+ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+ax.set_ylim(0, 1.05)
 
 # --- Learning Rate ---
 ax = axes[2]
-ax.plot(epochs_range, history["lr"], label="Learning Rate", color="tab:green")
-ax.set_xlabel("Epoch")
-ax.set_ylabel("LR")
-ax.set_title("Learning Rate Schedule")
-ax.legend()
-ax.grid(True, alpha=0.3)
+ax.plot(epochs_range, history["lr"], color="tab:green")
+if PHASE1_EPOCHS < actual_epochs:
+    ax.axvline(x=PHASE1_EPOCHS, color="purple", linestyle=":", alpha=0.7,
+               label=f"Phase 2 (lr reset → {PHASE2_LR:.0e})")
+ax.set_xlabel("Epoch"); ax.set_ylabel("LR"); ax.set_title("Learning Rate Schedule")
+ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
 chart_path = OUTPUT_DIR / "training_curves.png"
@@ -615,19 +685,28 @@ print(f"[INFO] Đã lưu history: {history_path}")
 # ============================================================
 # Cell 11: Tổng kết
 # ============================================================
+gap_final = history["train_acc"][-1] - history["val_acc"][-1]
+gap_best  = history["train_acc"][best_epoch-1] - history["val_acc"][best_epoch-1]
+
 print("\n" + "=" * 70)
-print("  HOÀN TẤT HUẤN LUYỆN STAGE 2 – CLASSIFIER")
+print("  HOÀN TẤT HUẤN LUYỆN STAGE 2 – CLASSIFIER (Cải tiến)")
 print("=" * 70)
-print(f"  Model           : EfficientNet-B2 (5 lớp)")
-print(f"  Lớp             : {', '.join(CLASS_NAMES)}")
-print(f"  Best epoch      : {best_epoch}/{EPOCHS}")
-print(f"  Best val acc    : {best_val_acc:.4f}")
-print(f"  Test accuracy   : {test_acc:.4f}")
-print(f"  Weights         : {final_dst}")
-print(f"  Training curves : {chart_path}")
-print(f"  Confusion matrix: {cm_path}")
+print(f"  Model            : EfficientNet-B2 (5 lớp)")
+print(f"  Lớp              : {', '.join(CLASS_NAMES)}")
+print(f"  Kỹ thuật mới     : Freeze→Unfreeze, Dropout({DROPOUT_RATE}), RandAugment,")
+print(f"                     LabelSmoothing({LABEL_SMOOTHING}), EarlyStopping")
+print(f"  Best epoch       : {best_epoch} (/{len(history['train_loss'])} epoch thực tế)")
+print(f"  Best val acc     : {best_val_acc:.4f}")
+print(f"  Test accuracy    : {test_acc:.4f}")
+print(f"  Overfitting gap  : {gap_best:+.4f} (tại best epoch)")
+print(f"  Weights          : {final_dst}")
+print(f"  Training curves  : {chart_path}")
+print(f"  Confusion matrix : {cm_path}")
 print("=" * 70)
+print("\n  So sánh với phiên bản gốc (nếu có cải thiện):")
+print(f"  Gốc  → Best val acc = 70.1% (epoch 6/50, gap ≈ 30%)")
+print(f"  Mới  → Best val acc = {best_val_acc:.1%} (epoch {best_epoch}, gap ≈ {gap_best:.1%})")
 print("\n[DONE] Pipeline 2 giai đoạn hoàn tất!")
 print("  Stage 1: YOLO binary detector  → phát hiện vùng rác")
-print("  Stage 2: EfficientNet-B2       → phân loại 5 lớp rác")
+print("  Stage 2: EfficientNet-B2       → phân loại 6 lớp (có Background để lọc FP)")
 print("  → Sẵn sàng ghép vào pipeline inference.")

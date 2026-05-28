@@ -39,7 +39,7 @@ def parse_yolo_labels(lbl_path, img_w, img_h):
             parts = line.strip().split()
             if len(parts) != 5: continue
             
-            cls_id = int(parts[0])
+            cls_id = int(parts[0]) + 1  # [MỚI] Shift +1 vì GT YOLO là 0-4 (Glass-Plastic), còn Classifier là 1-5 (Background là 0)
             cx, cy, w, h = map(float, parts[1:])
             
             x1 = (cx - w/2) * img_w
@@ -80,9 +80,9 @@ def evaluate(detector, img_dir, lbl_dir, iou_thresh=0.5):
     print(f"[INFO] Bắt đầu đánh giá trên {len(img_paths)} ảnh test...")
     
     # Biến lưu trữ True Positive, False Positive, False Negative cho mỗi lớp
-    tp = {i: 0 for i in range(5)}
-    fp = {i: 0 for i in range(5)}
-    fn = {i: 0 for i in range(5)}
+    tp = {i: 0 for i in range(6)}
+    fp = {i: 0 for i in range(6)}
+    fn = {i: 0 for i in range(6)}
     
     # Dùng cho Confusion Matrix (chỉ tính những box match IoU)
     y_true_cls = []
@@ -146,9 +146,9 @@ def evaluate(detector, img_dir, lbl_dir, iou_thresh=0.5):
                 # Không match với GT nào -> False Positive cho lớp dự đoán
                 fp[pred_cls] += 1
                 
-    # Tính toán metrics cuối cùng
+    # Tính toán metrics cuối cùng (cho cả 6 lớp)
     metrics = {}
-    for i in range(5):
+    for i in range(6):
         precision = tp[i] / (tp[i] + fp[i]) if (tp[i] + fp[i]) > 0 else 0
         recall = tp[i] / (tp[i] + fn[i]) if (tp[i] + fn[i]) > 0 else 0
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
@@ -220,12 +220,12 @@ def main():
     df_comp = pd.DataFrame(comp_data)
     df_comp.to_csv(out_dir / 'comparison_table.csv', index=False)
     
-    # 3. Confusion Matrix
-    cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2, 3, 4])
-    plt.figure(figsize=(8, 6))
+    # 3. Confusion Matrix (6 lớp)
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2, 3, 4, 5])
+    plt.figure(figsize=(10, 8))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=[CLASS_NAMES[i] for i in range(5)],
-                yticklabels=[CLASS_NAMES[i] for i in range(5)])
+                xticklabels=[CLASS_NAMES[i] for i in range(6)],
+                yticklabels=[CLASS_NAMES[i] for i in range(6)])
     plt.title('Stage 2 Classification Confusion Matrix (Matched Boxes)')
     plt.xlabel('Predicted')
     plt.ylabel('Ground Truth')
