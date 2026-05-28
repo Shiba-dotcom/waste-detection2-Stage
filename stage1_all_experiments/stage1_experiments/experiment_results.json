@@ -1,0 +1,157 @@
+{
+  "Baseline": {
+    "Precision": 0.5421,
+    "Recall": 0.6547,
+    "F1": 0.5931,
+    "TP": 476,
+    "FP": 402,
+    "FN": 251,
+    "Total GT": 727,
+    "Total Pred": 878,
+    "Time (s)": 19.1,
+    "size_stats": {
+      "small": {
+        "tp": 247,
+        "fn": 228,
+        "total": 475,
+        "recall": 0.52
+      },
+      "medium": {
+        "tp": 135,
+        "fn": 11,
+        "total": 146,
+        "recall": 0.9247
+      },
+      "large": {
+        "tp": 94,
+        "fn": 12,
+        "total": 106,
+        "recall": 0.8868
+      }
+    }
+  },
+  "TN1_LowConf": {
+    "Precision": 0.408,
+    "Recall": 0.6864,
+    "F1": 0.5118,
+    "TP": 499,
+    "FP": 724,
+    "FN": 228,
+    "Total GT": 727,
+    "Total Pred": 1223,
+    "Time (s)": 19.1,
+    "size_stats": {
+      "small": {
+        "tp": 268,
+        "fn": 207,
+        "total": 475,
+        "recall": 0.5642
+      },
+      "medium": {
+        "tp": 136,
+        "fn": 10,
+        "total": 146,
+        "recall": 0.9315
+      },
+      "large": {
+        "tp": 95,
+        "fn": 11,
+        "total": 106,
+        "recall": 0.8962
+      }
+    }
+  },
+  "TN2_SAHI": {
+    "Precision": 0.0853,
+    "Recall": 0.6341,
+    "F1": 0.1503,
+    "TP": 461,
+    "FP": 4946,
+    "FN": 266,
+    "Total GT": 727,
+    "Total Pred": 5407,
+    "Time (s)": 235.6,
+    "size_stats": {
+      "small": {
+        "tp": 248,
+        "fn": 227,
+        "total": 475,
+        "recall": 0.5221
+      },
+      "medium": {
+        "tp": 124,
+        "fn": 22,
+        "total": 146,
+        "recall": 0.8493
+      },
+      "large": {
+        "tp": 89,
+        "fn": 17,
+        "total": 106,
+        "recall": 0.8396
+      }
+    }
+  },
+  "TN3_SAHI+LowConf": {
+    "Precision": 0.0611,
+    "Recall": 0.6314,
+    "F1": 0.1114,
+    "TP": 459,
+    "FP": 7053,
+    "FN": 268,
+    "Total GT": 727,
+    "Total Pred": 7512,
+    "Time (s)": 234.6,
+    "size_stats": {
+      "small": {
+        "tp": 247,
+        "fn": 228,
+        "total": 475,
+        "recall": 0.52
+      },
+      "medium": {
+        "tp": 123,
+        "fn": 23,
+        "total": 146,
+        "recall": 0.8425
+      },
+      "large": {
+        "tp": 89,
+        "fn": 17,
+        "total": 106,
+        "recall": 0.8396
+      }
+    }
+  },
+  "TN4_YOLO26s": {
+    "Precision": 0.6317,
+    "Recall": 0.5048,
+    "F1": 0.5612,
+    "TP": 367,
+    "FP": 214,
+    "FN": 360,
+    "Total GT": 727,
+    "Total Pred": 581,
+    "Time (s)": 18.7,
+    "size_stats": {
+      "small": {
+        "tp": 165,
+        "fn": 310,
+        "total": 475,
+        "recall": 0.3474
+      },
+      "medium": {
+        "tp": 118,
+        "fn": 28,
+        "total": 146,
+        "recall": 0.8082
+      },
+      "large": {
+        "tp": 84,
+        "fn": 22,
+        "total": 106,
+        "recall": 0.7925
+      }
+    }
+  }
+}
