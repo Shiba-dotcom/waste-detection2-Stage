@@ -85,10 +85,13 @@ SEED           = 42
 PHASE1_EPOCHS  = 10           # Số epoch train với backbone đóng băng
 PHASE1_LR      = 5e-4         # LR cao hơn khi chỉ train head
 PHASE2_LR      = 5e-5         # LR rất thấp khi fine-tune toàn bộ
-WEIGHT_DECAY   = 3e-4         # Tăng L2 regularization (gốc: 1e-4)
-DROPOUT_RATE   = 0.4          # Dropout trước classifier head
+WEIGHT_DECAY   = 1e-4         # L2 regularization
+DROPOUT_RATE   = 0.5          # Dropout trước classifier head (tăng 0.4→0.5)
 LABEL_SMOOTHING = 0.1         # Tránh model quá tự tin
 EARLY_STOP_PATIENCE = 12      # Dừng sớm nếu val_loss không cải thiện
+
+# ----- Mixup Augmentation -----
+MIXUP_ALPHA    = 0.3          # Tham số phân phối Beta cho Mixup (0 = tắt)
 
 # ----- Giới hạn mẫu Plastic (xử lý imbalance) -----
 PLASTIC_CAP    = 2500
@@ -394,8 +397,27 @@ print(f"[INFO] AMP       : {'Enabled' if torch.cuda.is_available() else 'Disable
 # EARLY STOPPING: dừng nếu val_loss không cải thiện sau N epoch
 
 
-def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
-    """Huấn luyện 1 epoch, trả về (avg_loss, accuracy)."""
+def mixup_data(x, y, alpha=0.3, device="cpu"):
+    """Mixup augmentation: trộn ngẫu nhiên 2 ảnh và nhãn.
+    Trả về (mixed_x, y_a, y_b, lam) để tính mixed loss.
+    """
+    if alpha <= 0:
+        return x, y, y, 1.0
+    lam = np.random.beta(alpha, alpha)
+    batch_size = x.size(0)
+    index = torch.randperm(batch_size, device=device)
+    mixed_x = lam * x + (1 - lam) * x[index]
+    y_a, y_b = y, y[index]
+    return mixed_x, y_a, y_b, lam
+
+
+def mixup_criterion(criterion, pred, y_a, y_b, lam):
+    """Loss = lam * L(pred, y_a) + (1-lam) * L(pred, y_b)."""
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
+
+def train_one_epoch(model, loader, criterion, optimizer, scaler, device, mixup_alpha=0.3):
+    """Huấn luyện 1 epoch với Mixup Augmentation, trả về (avg_loss, accuracy)."""
     model.train()
     running_loss = 0.0
     correct = 0
@@ -406,20 +428,24 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
 
+        # ── Mixup augmentation ──
+        images, labels_a, labels_b, lam = mixup_data(images, labels, alpha=mixup_alpha, device=device)
+
         optimizer.zero_grad()
 
         with torch.amp.autocast("cuda", enabled=torch.cuda.is_available()):
             outputs = model(images)
-            loss = criterion(outputs, labels)
+            loss = mixup_criterion(criterion, outputs, labels_a, labels_b, lam)
 
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
         running_loss += loss.item() * images.size(0)
+        # Accuracy tính theo nhãn gốc (labels_a) cho dễ theo dõi
         _, predicted = outputs.max(1)
         total   += labels.size(0)
-        correct += predicted.eq(labels).sum().item()
+        correct += (lam * predicted.eq(labels_a).float() + (1 - lam) * predicted.eq(labels_b).float()).sum().item()
 
         pbar.set_postfix(loss=f"{loss.item():.4f}", acc=f"{correct/total:.4f}")
 
@@ -428,7 +454,7 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
 
 @torch.no_grad()
 def evaluate(model, loader, criterion, device):
-    """Đánh giá model, trả về (avg_loss, accuracy, all_preds, all_labels)."""
+    """Đánh giá model (standard), trả về (avg_loss, accuracy, all_preds, all_labels)."""
     model.eval()
     running_loss = 0.0
     correct = 0
@@ -454,6 +480,83 @@ def evaluate(model, loader, criterion, device):
         all_labels.extend(labels.cpu().numpy())
 
     return running_loss / total, correct / total, np.array(all_preds), np.array(all_labels)
+
+
+@torch.no_grad()
+def evaluate_tta(model, dataset, criterion, device, n_augments=5):
+    """Test Time Augmentation (TTA): average softmax của N phép augment khác nhau.
+
+    Dùng riêng cho tập Test sau khi chọn best model.
+    n_augments: số lần augment cho mỗi ảnh (5 = cân bằng giữa accuracy và tốc độ).
+    """
+    model.eval()
+
+    # TTA transforms: thêm flip + crop so với eval chuẩn
+    tta_transforms = [
+        transforms.Compose([
+            transforms.Resize(256), transforms.CenterCrop(IMG_SIZE),
+            transforms.ToTensor(), transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        ]),
+        transforms.Compose([
+            transforms.Resize(256), transforms.CenterCrop(IMG_SIZE),
+            transforms.RandomHorizontalFlip(p=1.0),
+            transforms.ToTensor(), transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        ]),
+        transforms.Compose([
+            transforms.Resize(288), transforms.CenterCrop(IMG_SIZE),
+            transforms.ToTensor(), transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        ]),
+        transforms.Compose([
+            transforms.Resize(256), transforms.RandomCrop(IMG_SIZE),
+            transforms.ToTensor(), transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        ]),
+        transforms.Compose([
+            transforms.Resize(256), transforms.CenterCrop(IMG_SIZE),
+            transforms.RandomVerticalFlip(p=1.0),
+            transforms.ToTensor(), transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        ]),
+    ]
+    tta_transforms = tta_transforms[:n_augments]
+
+    all_preds  = []
+    all_labels = []
+    running_loss = 0.0
+    total = 0
+
+    from torch.utils.data import DataLoader
+    from torchvision.datasets import ImageFolder
+
+    # Lấy list đường dẫn ảnh + nhãn gốc từ dataset
+    samples = dataset.samples  # [(path, label), ...]
+    from PIL import Image
+
+    for img_path, label in tqdm(samples, desc="  TTA ", leave=False, ncols=100):
+        img = Image.open(img_path).convert("RGB")
+        label_tensor = torch.tensor(label, device=device)
+
+        # Chạy N augment, lấy trung bình softmax
+        probs_list = []
+        for tf in tta_transforms:
+            inp = tf(img).unsqueeze(0).to(device)
+            with torch.amp.autocast("cuda", enabled=torch.cuda.is_available()):
+                logits = model(inp)
+            probs_list.append(torch.softmax(logits, dim=1))
+
+        avg_probs = torch.stack(probs_list).mean(dim=0)  # (1, num_classes)
+        pred = avg_probs.argmax(dim=1).item()
+
+        # Tính loss từ avg_probs (dùng NLLLoss vì đã có softmax)
+        log_probs = torch.log(avg_probs + 1e-9)
+        loss = nn.NLLLoss()(log_probs, label_tensor.unsqueeze(0))
+        running_loss += loss.item()
+
+        all_preds.append(pred)
+        all_labels.append(label)
+        total += 1
+
+    avg_loss = running_loss / total
+    acc = sum(p == l for p, l in zip(all_preds, all_labels)) / total
+    return avg_loss, acc, np.array(all_preds), np.array(all_labels)
 
 
 # ─────────────── Main Training Loop ───────────────
@@ -510,7 +613,8 @@ for epoch in range(1, EPOCHS + 1):
 
     # ── Train & Validate ──
     train_loss, train_acc = train_one_epoch(
-        model, train_loader, criterion, optimizer, scaler, DEVICE
+        model, train_loader, criterion, optimizer, scaler, DEVICE,
+        mixup_alpha=MIXUP_ALPHA,
     )
     val_loss, val_acc, _, _ = evaluate(
         model, val_loader, criterion, DEVICE
@@ -632,10 +736,17 @@ from sklearn.metrics import (
 model.load_state_dict(best_model_wts)
 model.eval()
 
-# Chạy inference trên test set
-test_loss, test_acc, test_preds, test_labels = evaluate(
-    model, test_loader, criterion, DEVICE
+# Chạy inference trên test set với TTA (Test Time Augmentation)
+print("[INFO] Đang chạy TTA trên tập Test...")
+test_loss, test_acc, test_preds, test_labels = evaluate_tta(
+    model, test_dataset, criterion, DEVICE, n_augments=5
 )
+print(f"[INFO] TTA hoàn tất – Test Acc (TTA): {test_acc:.4f}")
+
+# So sánh nhanh với standard eval
+_, std_acc, _, _ = evaluate(model, test_loader, criterion, DEVICE)
+print(f"[INFO] Standard Acc (không TTA)    : {std_acc:.4f}")
+print(f"[INFO] TTA cải thiện               : {test_acc - std_acc:+.4f}")
 
 print("\n" + "=" * 70)
 print("  KẾT QUẢ TRÊN TẬP TEST")

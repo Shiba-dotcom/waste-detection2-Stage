@@ -39,19 +39,50 @@ COLORS = {
 }
 
 def load_classifier(weights_path, device):
-    """Khởi tạo và load trọng số cho model Classification (EfficientNet-B2)."""
-    model = timm.create_model('efficientnet_b2', num_classes=6)
+    """Khởi tạo và load trọng số cho model Classification (EfficientNet-B2).
     
+    Tái tạo đúng kiến trúc head Sequential(Dropout, Linear) như khi train.
+    Tự động đọc num_classes và class_names từ checkpoint.
+    """
+    # ── Bước 1: Đọc checkpoint trước để lấy thông tin cấu trúc ──
+    num_classes = 6   # fallback mặc định
+    dropout_rate = 0.4
+    state_dict = None
+
     if weights_path.exists():
         checkpoint = torch.load(weights_path, map_location=device)
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Đọc metadata từ checkpoint (nếu có)
+        if isinstance(checkpoint, dict):
+            num_classes  = checkpoint.get('num_classes',  num_classes)
+            state_dict   = checkpoint.get('model_state_dict', checkpoint)
+            loaded_names = checkpoint.get('class_names', None)
+            if loaded_names:
+                # Cập nhật CLASS_NAMES toàn cục theo checkpoint
+                global CLASS_NAMES
+                CLASS_NAMES = {i: name for i, name in enumerate(loaded_names)}
         else:
-            model.load_state_dict(checkpoint)
+            state_dict = checkpoint
+
         print(f"[INFO] Đã load classifier weights từ: {weights_path}")
+        print(f"[INFO] num_classes = {num_classes}, classes = {list(CLASS_NAMES.values())}")
     else:
         print(f"[WARN] Không tìm thấy classifier weights tại {weights_path}, sử dụng weights khởi tạo!")
-        
+
+    # ── Bước 2: Tạo backbone (không custom head) ──
+    model = timm.create_model('efficientnet_b2', pretrained=False)
+
+    # ── Bước 3: Gắn đúng head Sequential(Dropout, Linear) như lúc train ──
+    in_features = model.classifier.in_features
+    model.classifier = torch.nn.Sequential(
+        torch.nn.Dropout(p=dropout_rate),
+        torch.nn.Linear(in_features, num_classes)
+    )
+
+    # ── Bước 4: Load weights ──
+    if state_dict is not None:
+        model.load_state_dict(state_dict)
+
     model = model.to(device)
     model.eval()
     return model
