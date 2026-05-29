@@ -67,9 +67,10 @@ else:
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# ----- Tên 6 lớp (thứ tự quan trọng – phải khớp với ImageFolder chữ cái đầu) -----
-CLASS_NAMES = ["Background", "Glass", "Metal", "Other", "Paper", "Plastic"]
-NUM_CLASSES = len(CLASS_NAMES)
+# ----- Tên lớp sẽ được xác định tự động từ thư mục data (ImageFolder – alphabetical) -----
+# CLASS_NAMES và NUM_CLASSES sẽ được set sau khi load dataset (xem Cell 4).
+CLASS_NAMES = None   # placeholder – được gán sau khi load dataset
+NUM_CLASSES = None   # placeholder – được gán sau khi load dataset
 
 # ----- Siêu tham số -----
 IMG_SIZE       = 224          # EfficientNet-B2 input size chuẩn
@@ -212,19 +213,27 @@ print("  LOADING DATASET")
 print("=" * 60)
 
 # ImageFolder tự động gán label theo tên thư mục (alphabetical order).
-# Thứ tự: Glass=0, Metal=1, Other=2, Paper=3, Plastic=4 → khớp CLASS_NAMES.
 train_dataset_full = datasets.ImageFolder(str(DATA_DIR / "train"), transform=train_transforms)
 val_dataset   = datasets.ImageFolder(str(DATA_DIR / "val"),   transform=eval_transforms)
 test_dataset  = datasets.ImageFolder(str(DATA_DIR / "test"),  transform=eval_transforms)
 
-# Xác nhận thứ tự lớp khớp với CLASS_NAMES
-actual_classes = list(train_dataset_full.class_to_idx.keys())
-print(f"  Lớp phát hiện : {actual_classes}")
-assert actual_classes == CLASS_NAMES, (
-    f"[LỖI] Thứ tự lớp không khớp!\n"
-    f"  Mong đợi : {CLASS_NAMES}\n"
-    f"  Thực tế  : {actual_classes}"
-)
+# Tự động lấy tên lớp từ dataset (không hard-code cứng)
+CLASS_NAMES = list(train_dataset_full.class_to_idx.keys())
+NUM_CLASSES = len(CLASS_NAMES)
+print(f"  Lớp phát hiện : {CLASS_NAMES}  ({NUM_CLASSES} lớp)")
+
+# Kiểm tra val/test có cùng lớp không
+val_classes  = list(val_dataset.class_to_idx.keys())
+test_classes = list(test_dataset.class_to_idx.keys())
+for split_name, split_classes in [("val", val_classes), ("test", test_classes)]:
+    missing = set(CLASS_NAMES) - set(split_classes)
+    extra   = set(split_classes) - set(CLASS_NAMES)
+    if missing:
+        print(f"  [WARN] {split_name}: thiếu lớp {missing}")
+    if extra:
+        print(f"  [WARN] {split_name}: thừa lớp  {extra}")
+    if not missing and not extra:
+        print(f"  [OK]   {split_name}: lớp khớp với train")
 
 # --- Kỹ thuật 1: Cap mẫu Plastic ---
 print(f"\n  [1/3] Cap Plastic ≤ {PLASTIC_CAP} mẫu")
@@ -349,14 +358,29 @@ print(f"  Classifier head  : Dropout({DROPOUT_RATE}) → Linear({in_features} �
 
 # %%
 # ============================================================
+# Cell 6: Khởi tạo Loss, Optimizer, Scheduler
+# ============================================================
 
 # Mixed precision – tăng tốc 1.5-2x trên GPU (T4, P100, V100...)
 # GradScaler giúp tránh underflow khi dùng FP16.
 scaler = torch.amp.GradScaler("cuda", enabled=torch.cuda.is_available())
 
-print(f"[INFO] Loss      : CrossEntropyLoss (weighted)")
-print(f"[INFO] Optimizer : AdamW (lr={LEARNING_RATE}, wd={WEIGHT_DECAY})")
-print(f"[INFO] Scheduler : CosineAnnealingLR (T_max={EPOCHS})")
+# Loss với class weights (tính ở Cell 4)
+criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=LABEL_SMOOTHING)
+
+# Optimizer Phase 1 – chỉ train classifier head (backbone bị frozen)
+optimizer = optim.AdamW(
+    filter(lambda p: p.requires_grad, model.parameters()),
+    lr=PHASE1_LR,
+    weight_decay=WEIGHT_DECAY,
+)
+
+# Scheduler cho Phase 1 (T_max = số epoch còn lại trong phase 1)
+scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=PHASE1_EPOCHS)
+
+print(f"[INFO] Loss      : CrossEntropyLoss (weighted, label_smoothing={LABEL_SMOOTHING})")
+print(f"[INFO] Optimizer : AdamW Phase1 (lr={PHASE1_LR:.0e}, wd={WEIGHT_DECAY})")
+print(f"[INFO] Scheduler : CosineAnnealingLR (T_max Phase1={PHASE1_EPOCHS})")
 print(f"[INFO] AMP       : {'Enabled' if torch.cuda.is_available() else 'Disabled (CPU)'}")
 
 # %%
@@ -669,7 +693,7 @@ print(f"[INFO] Đã lưu checkpoint: {weights_path}")
 
 # Copy sang models/ để pipeline inference dùng
 if ON_KAGGLE:
-    final_dst = Path("/kaggle/working/stage2_best.pth")
+    final_dst = Path("/kaggle/working/waste-detection2-Stage/models/stage2_best.pth")
 else:
     final_dst = Path(__file__).resolve().parents[1] / "models" / "stage2_best.pth"
 
@@ -693,7 +717,7 @@ gap_best  = history["train_acc"][best_epoch-1] - history["val_acc"][best_epoch-1
 print("\n" + "=" * 70)
 print("  HOÀN TẤT HUẤN LUYỆN STAGE 2 – CLASSIFIER (Cải tiến)")
 print("=" * 70)
-print(f"  Model            : EfficientNet-B2 (5 lớp)")
+print(f"  Model            : EfficientNet-B2 ({NUM_CLASSES} lớp)")
 print(f"  Lớp              : {', '.join(CLASS_NAMES)}")
 print(f"  Kỹ thuật mới     : Freeze→Unfreeze, Dropout({DROPOUT_RATE}), RandAugment,")
 print(f"                     LabelSmoothing({LABEL_SMOOTHING}), EarlyStopping")
@@ -708,7 +732,8 @@ print("=" * 70)
 print("\n  So sánh với phiên bản gốc (nếu có cải thiện):")
 print(f"  Gốc  → Best val acc = 70.1% (epoch 6/50, gap ≈ 30%)")
 print(f"  Mới  → Best val acc = {best_val_acc:.1%} (epoch {best_epoch}, gap ≈ {gap_best:.1%})")
-print("\n[DONE] Pipeline 2 giai đoạn hoàn tất!")
-print("  Stage 1: YOLO binary detector  → phát hiện vùng rác")
-print("  Stage 2: EfficientNet-B2       → phân loại 6 lớp (có Background để lọc FP)")
+print("[DONE] Pipeline 2 giai đoạn hoàn tất!")
+print("  Stage 1: YOLO binary detector  → phát hiện vùng chứa rác")
+print(f"  Stage 2: EfficientNet-B2       → phân loại {NUM_CLASSES} lớp: {', '.join(CLASS_NAMES)}")
 print("  → Sẵn sàng ghép vào pipeline inference.")
+
