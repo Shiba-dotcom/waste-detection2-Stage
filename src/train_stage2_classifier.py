@@ -334,6 +334,11 @@ model.classifier = nn.Sequential(
 
 model = model.to(DEVICE)
 
+# Multi-GPU: Sử dụng DataParallel nếu có nhiều hơn 1 GPU
+if torch.cuda.device_count() > 1:
+    print(f"[INFO] Sử dụng {torch.cuda.device_count()} GPUs với DataParallel!")
+    model = nn.DataParallel(model)
+
 # Đóng băng backbone cho Giai đoạn 1
 def freeze_backbone(model):
     """Đóng băng toàn bộ trừ classifier head."""
@@ -569,7 +574,9 @@ print("=" * 70)
 best_val_acc   = 0.0
 best_val_loss  = float("inf")
 best_epoch     = 0
-best_model_wts = copy.deepcopy(model.state_dict())
+# Unwrap DataParallel nếu có để lưu state_dict sạch
+_model_to_save = model.module if hasattr(model, 'module') else model
+best_model_wts = copy.deepcopy(_model_to_save.state_dict())
 early_stop_counter = 0
 phase = 1
 
@@ -640,7 +647,8 @@ for epoch in range(1, EPOCHS + 1):
     if val_acc > best_val_acc:
         best_val_acc   = val_acc
         best_epoch     = epoch
-        best_model_wts = copy.deepcopy(model.state_dict())
+        _model_to_save = model.module if hasattr(model, 'module') else model
+        best_model_wts = copy.deepcopy(_model_to_save.state_dict())
         print(f"  ★ New best! Val Acc = {val_acc:.4f}")
 
     # ── Early Stopping (theo val_loss) ──
@@ -733,7 +741,9 @@ from sklearn.metrics import (
 )
 
 # Load best weights
-model.load_state_dict(best_model_wts)
+# Load best weights vào model gốc (unwrap DataParallel nếu có)
+_model_to_load = model.module if hasattr(model, 'module') else model
+_model_to_load.load_state_dict(best_model_wts)
 model.eval()
 
 # Chạy inference trên test set với TTA (Test Time Augmentation)
