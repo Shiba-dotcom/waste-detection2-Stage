@@ -36,6 +36,7 @@ def parse_labels(lbl_path, w, h):
             parts = line.strip().split()
             if len(parts) >= 5:
                 cls = int(parts[0])
+                cls += 1  # Shift GT (0-4) lên +1 để khớp Classifier (0=BG, 1-5=rác)
                 cx, cy, bw, bh = map(float, parts[1:5])
                 x1 = (cx - bw / 2) * w
                 y1 = (cy - bh / 2) * h
