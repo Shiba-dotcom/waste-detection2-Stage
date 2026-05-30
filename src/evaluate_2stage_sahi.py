@@ -68,13 +68,27 @@ def main():
     )
     
     print("[INFO] Khởi tạo EfficientNet-B2 (Stage 2)...")
-    classifier = timm.create_model('efficientnet_b2', pretrained=False, num_classes=6)
+    checkpoint = torch.load(args.classifier, map_location=device, weights_only=False)
+    
+    # Đọc thông tin từ checkpoint
+    if "num_classes" in checkpoint:
+        num_classes = checkpoint["num_classes"]
+        classes = checkpoint.get("class_names", [f"Class_{i}" for i in range(num_classes)])
+    else:
+        num_classes = 6
+        classes = ['Background', 'Glass', 'Metal', 'Other', 'Paper', 'Plastic']
+    
+    print(f"[INFO] num_classes = {num_classes}, classes = {classes}")
+    
+    # Tìm index của class Background (nếu có)
+    bg_idx = classes.index("Background") if "Background" in classes else -1
+    
+    classifier = timm.create_model('efficientnet_b2', pretrained=False, num_classes=num_classes)
     in_features = classifier.classifier.in_features
     classifier.classifier = torch.nn.Sequential(
         torch.nn.Dropout(p=0.5),
-        torch.nn.Linear(in_features, 6)
+        torch.nn.Linear(in_features, num_classes)
     )
-    checkpoint = torch.load(args.classifier, map_location=device, weights_only=False)
     if "model_state_dict" in checkpoint:
         classifier.load_state_dict(checkpoint["model_state_dict"])
     else:
@@ -100,9 +114,9 @@ def main():
     matched = 0
     
     # Ma trận nhầm lẫn
-    tp = {c: 0 for c in range(6)}
-    fp = {c: 0 for c in range(6)}
-    fn = {c: 0 for c in range(6)}
+    tp = {c: 0 for c in range(num_classes)}
+    fp = {c: 0 for c in range(num_classes)}
+    fn = {c: 0 for c in range(num_classes)}
     
     print(f"[INFO] Bắt đầu SAHI Inference trên {len(img_paths)} ảnh...")
     
@@ -132,7 +146,6 @@ def main():
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
             
-            
             crop = img[y1:y2, x1:x2]
             if crop.size == 0: continue
             
@@ -143,7 +156,7 @@ def main():
                 out = classifier(crop_tensor)
                 cls_id = out.argmax(1).item()
                 
-            if cls_id != 0: # 0 = Background
+            if cls_id != bg_idx: # Bỏ qua Background (nếu có)
                 preds.append({'class': cls_id, 'bbox': [x1, y1, x2, y2]})
                 
         total_pred += len(preds)
@@ -187,11 +200,11 @@ def main():
     print("-"*60)
     print(f"{'Class':<12} {'Precision':>9} {'Recall':>9} {'F1':>9} {'TP':>5} {'FP':>5} {'FN':>5}")
     
-    classes = ['Background', 'Glass', 'Metal', 'Other', 'Paper', 'Plastic']
     macro_p, macro_r, macro_f1 = 0, 0, 0
     count = 0
     
-    for c in range(1, 6): # Bỏ qua background
+    for c in range(num_classes):
+        if c == bg_idx: continue  # Bỏ qua Background
         t = tp[c]
         f_p = fp[c]
         f_n = fn[c]
@@ -200,16 +213,18 @@ def main():
         r = t / (t + f_n) if (t + f_n) > 0 else 0
         f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0
         
-        print(f"{classes[c]:<12} {p:>9.4f} {r:>9.4f} {f1:>9.4f} {t:>5} {f_p:>5} {f_n:>5}")
+        cls_name = classes[c] if c < len(classes) else f"Class_{c}"
+        print(f"{cls_name:<12} {p:>9.4f} {r:>9.4f} {f1:>9.4f} {t:>5} {f_p:>5} {f_n:>5}")
         macro_p += p
         macro_r += r
         macro_f1 += f1
         count += 1
         
     print("-" * 60)
-    print(f"Macro P : {macro_p/count:.4f}")
-    print(f"Macro R : {macro_r/count:.4f}")
-    print(f"Macro F1: {macro_f1/count:.4f}")
+    if count > 0:
+        print(f"Macro P : {macro_p/count:.4f}")
+        print(f"Macro R : {macro_r/count:.4f}")
+        print(f"Macro F1: {macro_f1/count:.4f}")
     print("=" * 60)
 
 if __name__ == "__main__":
