@@ -334,11 +334,6 @@ model.classifier = nn.Sequential(
 
 model = model.to(DEVICE)
 
-# Multi-GPU: Sử dụng DataParallel nếu có nhiều hơn 1 GPU
-if torch.cuda.device_count() > 1:
-    print(f"[INFO] Sử dụng {torch.cuda.device_count()} GPUs với DataParallel!")
-    model = nn.DataParallel(model)
-
 # Đóng băng backbone cho Giai đoạn 1
 def freeze_backbone(model):
     """Đóng băng toàn bộ trừ classifier head."""
