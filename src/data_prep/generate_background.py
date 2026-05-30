@@ -32,7 +32,7 @@ ON_KAGGLE = _os.environ.get("ON_KAGGLE", "0") == "1" or _os.path.exists("/kaggle
 
 if ON_KAGGLE:
     BINARY_DIR = Path("/kaggle/working/waste-detection2-Stage/data/processed_binary")
-    OUTPUT_DIR = Path("/kaggle/working/classification_merged")
+    OUTPUT_DIR = Path("/kaggle/working/waste-detection2-Stage/data/classification_merged")
 else:
     BASE_DIR = Path(__file__).resolve().parents[2]
     BINARY_DIR = BASE_DIR / "data" / "processed_binary"
