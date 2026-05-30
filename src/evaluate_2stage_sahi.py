@@ -99,8 +99,7 @@ def main():
     
     img_transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
+        transforms.Resize((224, 224)), # [SỬA]: Ép về 224x224, không dùng CenterCrop để tránh cắt mất rác
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -155,11 +154,17 @@ def main():
             crop_tensor = img_transform(crop_rgb).unsqueeze(0).to(device)
             with torch.no_grad():
                 out = classifier(crop_tensor)
-                cls_id = out.argmax(1).item()
+                probs = torch.softmax(out, dim=1)
+                conf = probs[0].max().item()
+                cls_id = probs[0].argmax().item()
                 
             if cls_id != bg_idx: # Bỏ qua Background (nếu có)
-                preds.append({'class': cls_id, 'bbox': [x1, y1, x2, y2]})
+                preds.append({'class': cls_id, 'bbox': [x1, y1, x2, y2], 'conf': conf})
                 
+        # [SỬA]: Sắp xếp dự đoán theo độ tự tin (Confidence) giảm dần
+        # Điều này RẤT QUAN TRỌNG để khi tính IoU, dự đoán tốt nhất sẽ "chớp" ground truth trước
+        preds.sort(key=lambda x: x['conf'], reverse=True)
+        
         total_pred += len(preds)
         
         # Đối chiếu GT và Pred
