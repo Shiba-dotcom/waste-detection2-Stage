@@ -28,28 +28,39 @@ from inference_2stage import TwoStageDetector, CLASS_NAMES
 # Cấu hình & Hàm hỗ trợ
 # ============================================================
 
+# MAP CLASS: GT YOLO file dùng 0-4 (Glass, Metal, Other, Paper, Plastic)
+# Classifier dùng  0-5 (Background=0, Glass=1, ..., Plastic=5)
+# GT không có Background nên shift GT lên +1 để khớp với Classifier index.
+GT_CLASS_OFFSET = 1   # GT 0(Glass)→1(Glass), GT 4(Plastic)→5(Plastic)
+
 def parse_yolo_labels(lbl_path, img_w, img_h):
-    """Đọc file YOLO label và trả về danh sách [class_id, x1, y1, x2, y2]."""
+    """Dọc file YOLO label và trả về danh sách [class_id, x1, y1, x2, y2].
+
+    GT YOLO: 0=Glass,1=Metal,2=Other,3=Paper,4=Plastic (không có Background).
+    Sau shift +1: 1=Glass,...,5=Plastic – khớp với Classifier CLASS_NAMES.
+    """
     gt_boxes = []
     if not lbl_path.exists():
         return gt_boxes
-        
+
     with open(lbl_path, 'r') as f:
         for line in f:
             parts = line.strip().split()
-            if len(parts) != 5: continue
-            
-            cls_id = int(parts[0]) + 1  # [MỚI] Shift +1 vì GT YOLO là 0-4 (Glass-Plastic), còn Classifier là 1-5 (Background là 0)
+            if len(parts) != 5:
+                continue
+
+            cls_id = int(parts[0]) + GT_CLASS_OFFSET  # 0→1, 1→2, ..., 4→5
             cx, cy, w, h = map(float, parts[1:])
-            
+
             x1 = (cx - w/2) * img_w
             y1 = (cy - h/2) * img_h
             x2 = (cx + w/2) * img_w
             y2 = (cy + h/2) * img_h
-            
+
             gt_boxes.append([cls_id, x1, y1, x2, y2])
-            
+
     return gt_boxes
+
 
 def compute_iou(box1, box2):
     """Tính Intersection over Union (IoU) giữa 2 bounding box."""
@@ -75,92 +86,114 @@ def compute_iou(box1, box2):
 # ============================================================
 
 def evaluate(detector, img_dir, lbl_dir, iou_thresh=0.5):
-    """Chạy đánh giá trên toàn bộ dataset."""
-    img_paths = [p for p in Path(img_dir).rglob('*') if p.suffix.lower() in ['.jpg', '.jpeg', '.png']]
+    """Chạy đánh giá trên toàn bộ dataset.
+
+    Quy tắc TP/FP/FN:
+    - TP: pred bbox khớp IoU với GT và class đúng
+    - FP: pred bbox không khớp IoU với GT nào, hoặc khớp IoU nhưng sai class
+    - FN: GT bbox không được dự đoán TP (bỏ sót hoặc detect sai class)
+    """
+    img_paths = [p for p in Path(img_dir).rglob('*')
+                 if p.suffix.lower() in ['.jpg', '.jpeg', '.png']]
     print(f"[INFO] Bắt đầu đánh giá trên {len(img_paths)} ảnh test...")
-    
-    # Biến lưu trữ True Positive, False Positive, False Negative cho mỗi lớp
+
+    # TP, FP, FN cho từng lớp (6 lớp: 0=Background ... 5=Plastic)
+    # Lưu ý: GT không có class 0 (Background), nnên tp[0]=fp[0]=fn[0]=0 suốt
     tp = {i: 0 for i in range(6)}
     fp = {i: 0 for i in range(6)}
     fn = {i: 0 for i in range(6)}
-    
-    # Dùng cho Confusion Matrix (chỉ tính những box match IoU)
+
     y_true_cls = []
     y_pred_cls = []
-    
+
+    # Thống kê debug
+    total_gt = 0
+    total_pred = 0
+    total_iou_match = 0
+
     for img_path in tqdm(img_paths, desc="Evaluating"):
         img = cv2.imread(str(img_path))
-        if img is None: continue
+        if img is None:
+            continue
         h, w = img.shape[:2]
-        
-        # Lấy Ground Truth
+
+        # ── Ground Truth ──
         lbl_path = Path(lbl_dir) / img_path.relative_to(img_dir).with_suffix('.txt')
         gt_boxes = parse_yolo_labels(lbl_path, w, h)
-        
-        # Thống kê số lượng ban đầu vào FN (sẽ trừ đi nếu tìm thấy TP)
+        total_gt += len(gt_boxes)
+
+        # Đăng ký FN ban đầu (sẽ trừ khi tìm thấy TP)
         for gt in gt_boxes:
             fn[gt[0]] += 1
-            
-        # Lấy Predictions (2-stage)
+
+        # ── Predictions (2-stage) ──
         _, preds = detector.process_image(img)
-        
-        # Matching GT vs Preds
-        gt_matched = [False] * len(gt_boxes)
-        
-        # Sắp xếp preds theo confidence giảm dần
+        total_pred += len(preds)
+
+        # Sắp xếp theo confidence giảm dần
         preds = sorted(preds, key=lambda x: x['det_conf'], reverse=True)
-        
+
+        gt_matched = [False] * len(gt_boxes)
+
         for pred in preds:
             pred_box = pred['box']
-            pred_cls = pred['class_id']
-            
+            pred_cls = pred['class_id']   # 1–5 (Background đã bị lọc trước)
+
             best_iou = 0
             best_gt_idx = -1
-            
-            # Tìm GT khớp nhất (chưa được match)
+
             for i, gt in enumerate(gt_boxes):
-                if gt_matched[i]: continue
-                
+                if gt_matched[i]:
+                    continue
                 iou = compute_iou(pred_box, gt[1:])
                 if iou > best_iou:
                     best_iou = iou
                     best_gt_idx = i
-                    
+
             if best_iou >= iou_thresh:
-                # Tìm thấy match!
+                # Có IoU match – đánh dấu GT đã được xử lý
                 gt_matched[best_gt_idx] = True
                 gt_cls = gt_boxes[best_gt_idx][0]
-                
-                # Ghi nhận cho Confusion Matrix
+                total_iou_match += 1
+
                 y_true_cls.append(gt_cls)
                 y_pred_cls.append(pred_cls)
-                
-                # Cập nhật TP/FP/FN
+
                 if pred_cls == gt_cls:
+                    # ✔ TP: detect đúng vị trí và đúng lớp
                     tp[pred_cls] += 1
-                    fn[gt_cls] -= 1  # Trừ đi FN vì đã tìm thấy đúng
+                    fn[gt_cls] -= 1       # Không bị bỏ sót nữa
                 else:
-                    fp[pred_cls] += 1
-                    # Không trừ FN của gt_cls vì đoán sai lớp
+                    # ✘ IoU match nhưng sai class
+                    fp[pred_cls] += 1     # Pred sai lớp → FP của lớp đó predict
+                    fn[gt_cls] -= 1       # [FIX] GT này đã bị consume (không còn chờ match)
+                    #                    nhưng class sai → FN giữ nguyên để phạt recall
+                    fn[gt_cls] += 1       # Phục hồi: GT vẫn bỏ sót về mặt phân loại
+                    # → Net effect: fn[gt_cls] không thay đổi (bỏ sót), fp[pred_cls]+=1
             else:
-                # Không match với GT nào -> False Positive cho lớp dự đoán
+                # Không khớp với GT nào → False Positive thuần
                 fp[pred_cls] += 1
-                
-    # Tính toán metrics cuối cùng (cho cả 6 lớp)
+
+    # ── In thống kê debug ──
+    print(f"\n[DEBUG] Tổng GT boxes    : {total_gt}")
+    print(f"[DEBUG] Tổng Pred boxes   : {total_pred}")
+    print(f"[DEBUG] IoU matches (≥{iou_thresh:.2f}): {total_iou_match}")
+    iou_rate = total_iou_match / total_gt * 100 if total_gt > 0 else 0
+    print(f"[DEBUG] Tỷ lệ GT được match : {iou_rate:.1f}%")
+
+    # ── Tính metrics ──
     metrics = {}
     for i in range(6):
-        precision = tp[i] / (tp[i] + fp[i]) if (tp[i] + fp[i]) > 0 else 0
-        recall = tp[i] / (tp[i] + fn[i]) if (tp[i] + fn[i]) > 0 else 0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-        
+        prec = tp[i] / (tp[i] + fp[i]) if (tp[i] + fp[i]) > 0 else 0.0
+        rec  = tp[i] / (tp[i] + fn[i]) if (tp[i] + fn[i]) > 0 else 0.0
+        f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
         metrics[CLASS_NAMES[i]] = {
-            'Precision': precision,
-            'Recall': recall,
-            'F1': f1,
+            'Precision': prec, 'Recall': rec, 'F1': f1,
             'TP': tp[i], 'FP': fp[i], 'FN': fn[i]
         }
-        
+
     return metrics, y_true_cls, y_pred_cls
+
 
 # ============================================================
 # Main

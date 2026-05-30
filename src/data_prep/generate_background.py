@@ -3,8 +3,8 @@ generate_background.py - Tạo class Background (ảnh nhiễu) cho Classifier S
 Nhóm 2 - Waste Detection (2-Stage Pipeline)
 
 Script này đọc ảnh từ dataset gốc (processed_binary), sinh ra các random crops
-không đè lên bất kỳ rác nào (Ground Truth) để làm ảnh Background (nền).
-Mục tiêu: Dạy cho EfficientNet-B2 ở Stage 2 biết cách "từ chối" các False Positives
+không đè lên bất kỳ rác nào (Grođể làm ảnh Background (nền).
+Mục tiêu: Dạy cho EfficientNet-B2 ở Stage 2 bund Truth) iết cách "từ chối" các False Positives
 do YOLO sinh ra ở Stage 1 (ví dụ crop nhầm vào lá cây, mặt đường, tay người...).
 
 Chạy SAU: merge_external_datasets.py
@@ -32,7 +32,7 @@ ON_KAGGLE = _os.environ.get("ON_KAGGLE", "0") == "1" or _os.path.exists("/kaggle
 
 if ON_KAGGLE:
     BINARY_DIR = Path("/kaggle/working/waste-detection2-Stage/data/processed_binary")
-    OUTPUT_DIR = Path("/kaggle/working/waste-detection2-Stage/data/classification_merged")
+    OUTPUT_DIR = Path("/kaggle/working/classification_merged")
 else:
     BASE_DIR = Path(__file__).resolve().parents[2]
     BINARY_DIR = BASE_DIR / "data" / "processed_binary"
