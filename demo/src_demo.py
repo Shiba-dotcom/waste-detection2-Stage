@@ -30,8 +30,8 @@ from tkinter import filedialog, messagebox
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DEFAULT_CLS_MODEL_PATH    = os.path.join(_BASE, "models", "sahi_stage2.pth")
-DEFAULT_DETECT_MODEL_PATH = os.path.join(_BASE, "models", "sahi_best.pt")
+DEFAULT_CLS_MODEL_PATH    = os.path.join(_BASE, "models", "final_best.pth")
+DEFAULT_DETECT_MODEL_PATH = os.path.join(_BASE, "models", "final_best.pt")
 OUTPUT_DIR = os.path.join(_BASE, "results")
 
 # ── Theme: Eco / Waste Classification (đề tài phân loại rác thải) ──
@@ -165,21 +165,6 @@ def load_yolo_model(pt_path: str):
     """Load YOLO detection model từ .pt file (ultralytics)."""
     from ultralytics import YOLO
     model = YOLO(pt_path)
-    
-    # Init SAHI wrapper
-    try:
-        from sahi import AutoDetectionModel
-        sahi_model = AutoDetectionModel.from_pretrained(
-            model_type='yolov8',
-            model_path=pt_path,
-            confidence_threshold=0.25,
-            device="cuda:0" if torch.cuda.is_available() else "cpu"
-        )
-        model.sahi_model = sahi_model
-    except Exception as e:
-        print("Không thể load SAHI:", e)
-        model.sahi_model = None
-
     return model
 
 
@@ -232,31 +217,24 @@ def predict_with_detection(yolo_model, cls_model, device,
     W, H = pil_img.size
     detections = []
     
-    sahi_model = getattr(yolo_model, 'sahi_model', None)
-    
-    if sahi_model is not None:
-        from sahi.predict import get_sliced_prediction
-        sahi_model.confidence_threshold = conf_thresh
-        result = get_sliced_prediction(
-            img_np,
-            sahi_model,
-            slice_height=640,
-            slice_width=640,
-            overlap_height_ratio=0.2,
-            overlap_width_ratio=0.2
-        )
-        
-        for obj in result.object_prediction_list:
-            bbox = obj.bbox.to_xyxy()
-            conf_d = float(obj.score.value)
-            
-            x1, y1, x2, y2 = [max(0, int(v)) for v in bbox]
+    # Standard YOLO inference
+    results_yolo = yolo_model(img_np, conf=conf_thresh, verbose=False)
+    for r in results_yolo:
+        boxes = r.boxes
+        if boxes is None or len(boxes) == 0:
+            continue
+        for box in boxes:
+            xyxy  = box.xyxy[0].cpu().tolist()   # [x1, y1, x2, y2]
+            conf_d = float(box.conf[0].cpu())
+
+            x1, y1, x2, y2 = [max(0, int(v)) for v in xyxy]
             x2 = min(x2, W)
             y2 = min(y2, H)
 
             if (x2 - x1) < 5 or (y2 - y1) < 5:
                 continue
 
+            # Bước 2: crop và classify
             crop = pil_img.crop((x1, y1, x2, y2))
             cls_result = predict_cls(cls_model, device, crop,
                                      img_size, class_names, top_k=1)
@@ -270,38 +248,6 @@ def predict_with_detection(yolo_model, cls_model, device,
                 "label":      top_label,
                 "confidence": round(top_conf, 4),
             })
-    else:
-        # Standard YOLO inference
-        results_yolo = yolo_model(img_np, conf=conf_thresh, verbose=False)
-        for r in results_yolo:
-            boxes = r.boxes
-            if boxes is None or len(boxes) == 0:
-                continue
-            for box in boxes:
-                xyxy  = box.xyxy[0].cpu().tolist()   # [x1, y1, x2, y2]
-                conf_d = float(box.conf[0].cpu())
-    
-                x1, y1, x2, y2 = [max(0, int(v)) for v in xyxy]
-                x2 = min(x2, W)
-                y2 = min(y2, H)
-    
-                if (x2 - x1) < 5 or (y2 - y1) < 5:
-                    continue
-    
-                # Bước 2: crop và classify
-                crop = pil_img.crop((x1, y1, x2, y2))
-                cls_result = predict_cls(cls_model, device, crop,
-                                         img_size, class_names, top_k=1)
-                top_label = cls_result[0]["label"] if cls_result else "Waste"
-                top_conf  = cls_result[0]["confidence"] if cls_result else conf_d
-    
-                detections.append({
-                    "mode":       "detect",
-                    "bbox":       [x1, y1, x2, y2],
-                    "conf_det":   round(conf_d, 3),
-                    "label":      top_label,
-                    "confidence": round(top_conf, 4),
-                })
 
     # Fallback nếu YOLO không detect được gì
     if not detections:

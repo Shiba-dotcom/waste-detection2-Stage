@@ -10,7 +10,10 @@ với Ground Truth (IoU >= 0.5), từ đó tính toán:
 """
 
 import sys, io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+try:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+except AttributeError:
+    pass
 
 import cv2
 import numpy as np
