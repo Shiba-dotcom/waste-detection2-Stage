@@ -177,7 +177,7 @@ class TwoStageDetector:
             result = get_sliced_prediction(
                 img_bgr,
                 self.sahi_model,
-                slice_height=320, slice_width=320,
+                slice_height=640, slice_width=640,
                 overlap_height_ratio=0.2, overlap_width_ratio=0.2,
                 verbose=False
             )

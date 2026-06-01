@@ -30,8 +30,8 @@ from tkinter import filedialog, messagebox
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DEFAULT_CLS_MODEL_PATH    = os.path.join(_BASE, "models", "stage2_best.pth")
-DEFAULT_DETECT_MODEL_PATH = os.path.join(_BASE, "models", "best.pt")
+DEFAULT_CLS_MODEL_PATH    = os.path.join(_BASE, "models", "sahi_stage2.pth")
+DEFAULT_DETECT_MODEL_PATH = os.path.join(_BASE, "models", "sahi_best.pt")
 OUTPUT_DIR = os.path.join(_BASE, "results")
 
 # ── Theme: Eco / Waste Classification (đề tài phân loại rác thải) ──
@@ -240,8 +240,8 @@ def predict_with_detection(yolo_model, cls_model, device,
         result = get_sliced_prediction(
             img_np,
             sahi_model,
-            slice_height=512,
-            slice_width=512,
+            slice_height=640,
+            slice_width=640,
             overlap_height_ratio=0.2,
             overlap_width_ratio=0.2
         )
