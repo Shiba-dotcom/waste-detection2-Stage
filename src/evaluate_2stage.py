@@ -207,6 +207,7 @@ def main():
     parser.add_argument('--label-dir', type=str, required=True, help="Path to test labels dir")
     parser.add_argument('--conf', type=float, default=0.25, help="YOLO conf threshold")
     parser.add_argument('--iou', type=float, default=0.5, help="IoU threshold for matching")
+    parser.add_argument('--sahi', action='store_true', help="Use SAHI for Stage 1 Detection")
     parser.add_argument('--output', type=str, default='results/2stage/eval', help="Output dir")
     
     args = parser.parse_args()
@@ -215,7 +216,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     
     # Init model
-    detector = TwoStageDetector(args.detector, args.classifier, args.conf)
+    detector = TwoStageDetector(args.detector, args.classifier, args.conf, args.sahi)
     
     # Evaluate
     metrics, y_true, y_pred = evaluate(detector, args.data_dir, args.label_dir, args.iou)

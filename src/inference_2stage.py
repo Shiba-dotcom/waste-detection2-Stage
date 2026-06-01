@@ -138,13 +138,26 @@ def draw_prediction(img, box, cls_name, conf_det, conf_cls):
 # ============================================================
 
 class TwoStageDetector:
-    def __init__(self, detector_path, classifier_path, conf_thresh=0.25):
+    def __init__(self, detector_path, classifier_path, conf_thresh=0.25, use_sahi=False):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"[INFO] Đang sử dụng thiết bị: {self.device}")
         
         # Load Stage 1 (YOLO)
         self.detector = YOLO(detector_path)
         self.conf_thresh = conf_thresh
+        self.use_sahi = use_sahi
+        
+        if self.use_sahi:
+            from sahi import AutoDetectionModel
+            print("[INFO] Đang load SAHI AutoDetectionModel...")
+            self.sahi_model = AutoDetectionModel.from_pretrained(
+                model_type='yolov8',
+                model_path=detector_path,
+                confidence_threshold=conf_thresh,
+                device="cuda:0" if torch.cuda.is_available() else "cpu"
+            )
+        else:
+            self.sahi_model = None
         
         # Load Stage 2 (EfficientNet)
         self.classifier = load_classifier(Path(classifier_path), self.device)
@@ -156,9 +169,31 @@ class TwoStageDetector:
         result_img = img_bgr.copy()
         
         # --- Stage 1: Detection ---
-        det_results = self.detector(img_bgr, conf=self.conf_thresh, verbose=False)[0]
-        boxes = det_results.boxes.xyxy.cpu().numpy()
-        det_confs = det_results.boxes.conf.cpu().numpy()
+        boxes = []
+        det_confs = []
+        if self.use_sahi and self.sahi_model is not None:
+            from sahi.predict import get_sliced_prediction
+            self.sahi_model.confidence_threshold = self.conf_thresh
+            result = get_sliced_prediction(
+                img_bgr,
+                self.sahi_model,
+                slice_height=320, slice_width=320,
+                overlap_height_ratio=0.2, overlap_width_ratio=0.2,
+                verbose=False
+            )
+            for obj in result.object_prediction_list:
+                boxes.append(obj.bbox.to_xyxy())
+                det_confs.append(obj.score.value)
+            boxes = np.array(boxes) if len(boxes) > 0 else np.array([])
+            det_confs = np.array(det_confs) if len(det_confs) > 0 else np.array([])
+        else:
+            det_results = self.detector(img_bgr, conf=self.conf_thresh, verbose=False)[0]
+            if det_results.boxes is not None and len(det_results.boxes) > 0:
+                boxes = det_results.boxes.xyxy.cpu().numpy()
+                det_confs = det_results.boxes.conf.cpu().numpy()
+            else:
+                boxes = np.array([])
+                det_confs = np.array([])
         
         predictions = []
         
