@@ -34,6 +34,7 @@ def process_dataset(dir_name):
             if p.suffix.lower() in [".jpg", ".jpeg", ".png"]:
                 images.append(p)
 
+        images.sort()
         return images
 
 
