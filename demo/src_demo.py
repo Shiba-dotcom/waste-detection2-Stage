@@ -206,7 +206,7 @@ def predict_cls(cls_model, device, pil_img: Image.Image,
 
 def predict_with_detection(yolo_model, cls_model, device,
                             pil_img: Image.Image, img_size: int,
-                            class_names, conf_thresh: float = 0.25):
+                            class_names, conf_thresh: float = 0.40):
     """
     Pipeline 2 bước:
       1. YOLO → detect bbox vùng rác
