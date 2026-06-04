@@ -56,7 +56,7 @@ else:
 # 150 epochs + patience=20: đủ để hội tụ tốt trên dataset rác.
 MODEL_WEIGHTS = "yolo26s.pt"
 IMG_SIZE      = 640
-EPOCHS        = 150
+EPOCHS        = 100
 BATCH_SIZE    = 16
 PATIENCE      = 20
 OPTIMIZER     = "auto"
