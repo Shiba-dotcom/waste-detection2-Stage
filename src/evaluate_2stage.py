@@ -101,7 +101,10 @@ def evaluate(detector, img_dir, lbl_dir, iou_thresh=0.5):
     print(f"[INFO] Bắt đầu đánh giá trên {len(img_paths)} ảnh test...")
 
     # TP, FP, FN cho từng lớp (6 lớp: 0=Background ... 5=Plastic)
-    # Lưu ý: GT không có class 0 (Background), nnên tp[0]=fp[0]=fn[0]=0 suốt
+    # Lưu ý: GT không có class 0 (Background) vì Background chỉ là cơ chế lọc
+    # FP nội bộ của pipeline (inference_2stage.py bỏ qua box nào classified=BG).
+    # Do đó tp[0]=fp[0]=fn[0]=0 suốt → F1(Background)=0 theo định nghĩa toán học,
+    # không phải vì model kém mà vì không có GT nào để match.
     tp = {i: 0 for i in range(6)}
     fp = {i: 0 for i in range(6)}
     fn = {i: 0 for i in range(6)}
@@ -231,18 +234,22 @@ def main():
     print("="*50)
     print(df_metrics[['Precision', 'Recall', 'F1']].round(4))
     
-    # Tính Macro Average
-    macro_p = df_metrics['Precision'].mean()
-    macro_r = df_metrics['Recall'].mean()
-    macro_f1 = df_metrics['F1'].mean()
-    
+    # Tính Macro Average – chỉ tính trên 5 lớp rác thực sự (loại Background)
+    # Lý do: Background là cơ chế lọc FP nội bộ pipeline, GT không có annotation
+    # Background nên F1(Background)=0 theo định nghĩa, đưa vào macro sẽ làm giảm
+    # score giả tạo. Chuẩn benchmark (VOC, COCO) chỉ tính AP trên class có GT.
+    WASTE_CLASSES = ['Glass', 'Metal', 'Other', 'Paper', 'Plastic']
+    macro_p  = df_metrics.loc[WASTE_CLASSES, 'Precision'].mean()
+    macro_r  = df_metrics.loc[WASTE_CLASSES, 'Recall'].mean()
+    macro_f1 = df_metrics.loc[WASTE_CLASSES, 'F1'].mean()
+
     # mAP@0.5 xấp xỉ bằng Macro F1 trong detection (khi đánh giá tại 1 ngưỡng conf cố định)
     # Để tính mAP chính xác cần đường cong PR, ở đây dùng Macro F1 làm metric tương đương
-    
+
     print("-" * 50)
-    print(f"  Macro Precision : {macro_p:.4f}")
-    print(f"  Macro Recall    : {macro_r:.4f}")
-    print(f"  Macro F1 (≈mAP) : {macro_f1:.4f}")
+    print(f"  Macro Precision : {macro_p:.4f}  (trên 5 lớp rác, không tính Background)")
+    print(f"  Macro Recall    : {macro_r:.4f}  (trên 5 lớp rác, không tính Background)")
+    print(f"  Macro F1 (≈mAP) : {macro_f1:.4f}  (trên 5 lớp rác, không tính Background)")
     print("="*50)
     
     df_metrics.to_csv(out_dir / 'per_class_metrics.csv')
