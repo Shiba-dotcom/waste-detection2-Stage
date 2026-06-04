@@ -28,16 +28,12 @@ import torch
 
 from inference_2stage import TwoStageDetector, CLASS_NAMES
 
-# ── Reproducibility: fix seed đảm bảo kết quả ổn định giữa các lần chạy ──
-# CUDA non-determinism (CuDNN dùng thuật toán nhanh nhưng không deterministic)
-# là nguyên nhân chính khiến F1 dao động ±0.05 trên tập test nhỏ.
-SEED = 42
-torch.manual_seed(SEED)
-np.random.seed(SEED)
-torch.backends.cudnn.deterministic = True   # Bắt CuDNN dùng thuật toán deterministic
-torch.backends.cudnn.benchmark     = False  # Tắt auto-tune (chọn algo ngẫu nhiên)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED)
+# ── Ghi chú về reproducibility ──
+# evaluate_2stage.py không dùng TTA hay random augmentation,
+# nên kết quả về cơ bản đã ổn định (YOLO + EfficientNet đều ở eval mode).
+# Không set cudnn.deterministic vì nó thay đổi thuật toán CuDNN so với
+# lúc model được train, có thể làm F1 khác đi trên các borderline cases.
+
 
 # ============================================================
 # Cấu hình & Hàm hỗ trợ
