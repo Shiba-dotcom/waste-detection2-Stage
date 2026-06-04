@@ -491,7 +491,13 @@ def evaluate_tta(model, dataset, criterion, device, n_augments=5):
     """
     model.eval()
 
-    # TTA transforms: thêm flip + crop so với eval chuẩn
+    # TTA transforms – TẤT CẢ đều deterministic (không dùng Random*)
+    # Thay RandomCrop bằng crop tại góc trên-trái để giữ tính ổn định:
+    #   [0] Center crop (baseline)
+    #   [1] Horizontal flip
+    #   [2] Scale lớn hơn (resize 288 → center crop 224)
+    #   [3] Scale nhỏ hơn (resize 240 → center crop 224)
+    #   [4] Vertical flip
     tta_transforms = [
         transforms.Compose([
             transforms.Resize(256), transforms.CenterCrop(IMG_SIZE),
@@ -507,7 +513,7 @@ def evaluate_tta(model, dataset, criterion, device, n_augments=5):
             transforms.ToTensor(), transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]),
         transforms.Compose([
-            transforms.Resize(256), transforms.RandomCrop(IMG_SIZE),
+            transforms.Resize(240), transforms.CenterCrop(IMG_SIZE),  # scale nho hon
             transforms.ToTensor(), transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]),
         transforms.Compose([
