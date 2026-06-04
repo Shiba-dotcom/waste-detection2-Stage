@@ -805,9 +805,9 @@ print(f"[INFO] Đã lưu checkpoint: {weights_path}")
 
 # Copy sang models/ để pipeline inference dùng
 if ON_KAGGLE:
-    final_dst = Path("/kaggle/working/waste-detection2-Stage/models/stage2_best.pth")
+    final_dst = Path("/kaggle/working/waste-detection2-Stage/models/final_best.pth")
 else:
-    final_dst = Path(__file__).resolve().parents[1] / "models" / "stage2_best.pth"
+    final_dst = Path(__file__).resolve().parents[1] / "models" / "final_best.pth"
 
 final_dst.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(str(weights_path), str(final_dst))

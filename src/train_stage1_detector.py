@@ -39,36 +39,32 @@ print(f"[INFO] ultralytics version: {ultralytics.__version__}")
 # Chuyển ON_KAGGLE = True khi chạy trên Kaggle Notebook.
 # Ở local, giữ ON_KAGGLE = False.
 
-ON_KAGGLE = False
+import os as _os
+ON_KAGGLE = _os.environ.get("ON_KAGGLE", "0") == "1" or _os.path.exists("/kaggle/working")
 
 if ON_KAGGLE:
-    # Kaggle: dữ liệu input ở /kaggle/input/, output ở /kaggle/working/
-    DATA_DIR    = Path("/kaggle/input/waste-binary-tiled")
+    DATA_DIR     = Path("/kaggle/working/waste-detection2-Stage/data/processed_binary")
     DATASET_YAML = DATA_DIR / "dataset.yaml"
-    PROJECT_DIR = Path("/kaggle/working/yolo_runs")
+    PROJECT_DIR  = Path("/kaggle/working/waste-detection2-Stage/results/yolo26s_runs")
 else:
-    # Local: dùng thư mục processed_binary đã có sẵn (không dùng tiling cho Lần 1)
     BASE_DIR     = Path(__file__).resolve().parents[1]
     DATA_DIR     = BASE_DIR / "data" / "processed_binary"
     DATASET_YAML = DATA_DIR / "dataset.yaml"
-    PROJECT_DIR  = BASE_DIR / "results" / "yolo_runs"
+    PROJECT_DIR  = BASE_DIR / "results" / "yolo26s_runs"
 
-# ----- Siêu tham số huấn luyện -----
-# YOLOv8s: cân bằng giữa tốc độ và độ chính xác, phù hợp cho detection.
-# imgsz=640: kích thước input chuẩn, khớp với tile_size=640 trong pipeline tiling.
-# cos_lr=True: Cosine Annealing LR giúp hội tụ mượt hơn so với StepLR.
-# patience=20: early stopping nếu mAP không cải thiện sau 20 epoch.
-MODEL_WEIGHTS = "yolov8s.pt"
+# YOLO26s: phiên bản mới nhất, mAP cao hơn YOLOv8s với cùng tốc độ.
+# 150 epochs + patience=20: đủ để hội tụ tốt trên dataset rác.
+MODEL_WEIGHTS = "yolo26s.pt"
 IMG_SIZE      = 640
-EPOCHS        = 100
+EPOCHS        = 150
 BATCH_SIZE    = 16
 PATIENCE      = 20
-OPTIMIZER     = "auto"      # YOLO tự chọn optimizer phù hợp
-LR0           = 0.01        # Learning rate ban đầu
-COS_LR        = True        # Cosine Annealing scheduler
-AUGMENT       = True        # Bật augmentation mặc định của YOLO
-WORKERS       = 4           # Số worker cho DataLoader
-RUN_NAME      = "stage1_binary_yolov8s"
+OPTIMIZER     = "auto"
+LR0           = 0.01
+COS_LR        = True
+AUGMENT       = True
+WORKERS       = 4
+RUN_NAME      = "stage1"
 
 print(f"[INFO] Dataset YAML : {DATASET_YAML}")
 print(f"[INFO] Project dir  : {PROJECT_DIR}")
@@ -296,9 +292,9 @@ print(f"\n[INFO] Model đã export sang ONNX: {export_path}")
 # Trên Kaggle, copy vào /kaggle/working/ để download.
 
 if ON_KAGGLE:
-    final_dst = Path("/kaggle/working/stage1_best.pt")
+    final_dst = Path("/kaggle/working/waste-detection2-Stage/models/final_best.pt")
 else:
-    final_dst = Path(__file__).resolve().parents[1] / "models" / "stage1_best.pt"
+    final_dst = Path(__file__).resolve().parents[1] / "models" / "final_best.pt"
 
 final_dst.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(str(best_weights), str(final_dst))
