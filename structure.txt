@@ -1,80 +1,101 @@
-waste-detection_project/
-├── .venv/                   # Môi trường ảo
+waste-detection2-Stage/
 ├── .git/                    # Git repository
-├── .gitignore               
-├── requirements.txt         
+├── .gitignore
+├── requirements.txt
+├── structure.txt            # File mô tả cấu trúc dự án (file này)
 │
-├── data/                    # Chứa toàn bộ dữ liệu
-│   ├── raw/                 # Dữ liệu gốc (TACO)
+├── data/                    # Chứa toàn bộ dữ liệu (không commit lên Git)
+│   ├── raw/                 # Dữ liệu gốc (TACO Dataset)
 │   │   ├── annotations.json
-│   │   ├── annotations_cleaned.json
+│   │   ├── annotations_cleaned.json  # Sinh bởi data_cleaning.py
 │   │   └── batch_1..15/     # 15 thư mục ảnh gốc
-│   ├── processed/           # Dataset YOLO 5 classes (đã split)
+│   ├── processed/           # Dataset YOLO 5 classes (Glass/Metal/Other/Paper/Plastic)
 │   │   ├── dataset.yaml
 │   │   ├── images/{train,val,test}/
 │   │   └── labels/{train,val,test}/
-│   ├── processed_binary/    # [NEW] Dataset YOLO 1 class "Waste" (Stage 1)
-│   │   ├── dataset.yaml     # names: {0: Waste}
+│   ├── processed_binary/    # Dataset YOLO 1 class "Waste" (dùng cho Stage 1)
+│   │   ├── dataset.yaml
 │   │   ├── images/{train,val,test}/
 │   │   └── labels/{train,val,test}/
-│   ├── classification/      # [NEW] Dataset ImageFolder (Stage 2 - TACO crops)
-│   │   ├── {train,val,test}/
-│   │   │   ├── Glass/
-│   │   │   ├── Metal/
-│   │   │   ├── Other/
-│   │   │   ├── Paper/
-│   │   │   └── Plastic/
-│   └── classification_merged/  # [NEW] TACO + TrashNet + RealWaste (gộp)
-│       └── (same structure as classification/)
+│   ├── classification/      # Dataset ImageFolder từ TACO crops (dùng cho Stage 2)
+│   │   └── {train,val,test}/
+│   │       ├── Glass/
+│   │       ├── Metal/
+│   │       ├── Other/
+│   │       ├── Paper/
+│   │       └── Plastic/
+│   ├── classification_merged/  # TACO + TrashNet + RealWaste + Background (dataset cuối)
+│   │   └── {train,val,test}/
+│   │       ├── Background/
+│   │       ├── Glass/
+│   │       ├── Metal/
+│   │       ├── Other/
+│   │       ├── Paper/
+│   │       └── Plastic/
+│   └── external/            # Dataset ngoài (tải thủ công, không commit)
+│       ├── TrashNet/
+│       └── RealWaste/
 │
-├── models/                  # Thư mục chứa trọng số AI
-│   ├── yolov8n.pt           # Pretrained gốc
-│   ├── yolov8s.pt           # Pretrained gốc
-│   ├── stage1_detector/     # [NEW] Best weights YOLO binary
-│   └── stage2_classifier/   # [NEW] Best weights EfficientNet-B2
+├── models/                  # Trọng số AI đã huấn luyện (best weights)
+│   ├── 1_StageBaseline.pt   # YOLO Stage 1 - baseline (không tiling)
+│   ├── 1_StageSAHI.pt       # YOLO Stage 1 - tiled (dùng cho pipeline SAHI)
+│   ├── 2-Stage_best.pt      # YOLO Stage 1 - 2-Stage FINAL pipeline
+│   ├── 2-Stage_best.pth     # EfficientNet-B2 Stage 2 - 2-Stage FINAL pipeline
+│   ├── 2-Stage_SAHI.pt      # YOLO Stage 1 - 2-Stage SAHI pipeline
+│   └── 2-Stage_SAHI.pth     # EfficientNet-B2 Stage 2 - 2-Stage SAHI pipeline
 │
-├── reports/                 # Chứa các báo cáo trong tuần
+├── demo/                    # Giao diện demo trực quan
+│   ├── src_demo.py          # Script demo chính (Tkinter GUI)
 │
-├── notebooks/               # Chứa các kịch bản chạy thử nghiệm
-│   ├── EDA.py               # Phân tích dữ liệu
-│   ├── Results_Charts.py    
-│   └── experimental/        # 10 thí nghiệm 1-Stage (lưu trữ)
+├── notebooks/               # Jupyter Notebooks chạy thử nghiệm trên Kaggle
+│   ├── EDA_Data.ipynb       # Phân tích dữ liệu (EDA)
+│   ├── Evaluate/            # Notebooks đánh giá
+│   │   ├── 1-Stage_TestEvaluate.ipynb
+│   │   └── 2-stage-testevaluate-ipynb.ipynb
+│   └── Train/               # Notebooks huấn luyện
+│       ├── 1-Stage_baseline.ipynb
+│       ├── 1-Stage_Tiling.ipynb
+│       ├── 2-Stage_FINAL.ipynb
+│       └── 2-Stage_SAHI.ipynb
 │
 ├── src/                     # Mã nguồn chính
-│   ├── data_prep/           # Nhóm code xử lý dữ liệu
-│   │   ├── data_cleaning.py       # Làm sạch annotations
-│   │   ├── split_dataset.py       # Chia train/val/test (stratified)
-│   │   ├── tiling.py              # SAHI tiling (cho Stage 1)
-│   │   ├── crop_for_classification.py  # [NEW] Crop bbox → ảnh classification
-│   │   ├── merge_external_datasets.py  # [NEW] Gộp TrashNet + RealWaste
-│   │   ├── oversample.py         # (legacy - không dùng nữa)
-│   │   └── letterbox.py          # (legacy - không dùng nữa)
-│   ├── meta/                # Các file phụ trợ, cấu hình
-│   │   ├── mapping.csv           # 60 class → 5 nhóm
-│   │   ├── So_Mau.csv
-│   │   ├── SoMau.py
-│   │   └── dataSumary.py
-│   ├── Training_dataYolo.py       # COCO → YOLO (hỗ trợ binary mode)
-│   ├── train_stage1_detector.py   # [NEW] Train YOLO binary (Kaggle)
-│   ├── train_stage2_classifier.py # [NEW] Train EfficientNet-B2 (Kaggle)
-│   ├── inference_2stage.py        # [NEW] Pipeline inference kết hợp
-│   └── evaluate_2stage.py         # [NEW] Đánh giá end-to-end
+│   ├── data_prep/           # Tiền xử lý dữ liệu (chạy theo thứ tự pipeline)
+│   │   ├── data_cleaning.py          # Làm sạch annotations TACO
+│   │   ├── split_dataset.py          # Chia train/val/test (stratified)
+│   │   ├── tiling.py                 # Tiling ảnh 640x640 cho Stage 1
+│   │   ├── crop_for_classification.py # Crop BBox → dataset Classification
+│   │   ├── merge_external_datasets.py # Gộp TrashNet + RealWaste vào TACO
+│   │   ├── generate_background.py    # Sinh ảnh Background cho Stage 2
+│   │   ├── letterbox.py              # (legacy - không dùng nữa)
+│   │   ├── oversample.py             # (legacy - không dùng nữa)
+│   │   └── tiling_binary.py          # (legacy - không dùng nữa)
+│   ├── meta/                # File cấu hình & phụ trợ
+│   │   ├── mapping.csv      # Ánh xạ 60 class TACO → 5 nhóm (Glass/Metal/Other/Paper/Plastic)
+│   │   ├── SoMau.py         # Script đếm số mẫu (phụ trợ, không thuộc pipeline)
+│   │   ├── So_Mau.csv       # Output của SoMau.py
+│   │   └── dataSumary.py    # Script xem phân phối dataset (phụ trợ, không thuộc pipeline)
+│   ├── Training_dataYolo.py          # Chuyển COCO → YOLO (binary + 5 classes)
+│   ├── train_stage1_detector.py      # Huấn luyện YOLO binary (Stage 1)
+│   ├── train_stage2_classifier.py    # Huấn luyện EfficientNet-B2 (Stage 2)
+│   ├── inference_2stage.py           # inference kết hợp 2-Stage
+│   ├── evaluate_2stage.py            # Đánh giá end-to-end 2-Stage
+│   ├── evaluate_2stage_sahi.py       # Đánh giá 2-Stage với SAHI
+│   └── evaluate_stage1.py            # Đánh giá riêng Stage 1 (YOLO binary)
 │
-└── results/                 # Chứa các biểu đồ, kết quả, metrics
-    ├── (biểu đồ EDA, metrics 1-Stage cũ)
-    └── 2stage/              # [NEW] Kết quả 2-Stage
-
-Pipeline 2-Stage (Thứ tự chạy):
-
-1. Làm sạch dữ liệu: src/data_prep/data_cleaning.py
-2. Chuyển COCO → YOLO:
-   a. Binary (Stage 1): src/Training_dataYolo.py (BINARY_MODE=True)
-   b. 5 classes (Stage 2): src/Training_dataYolo.py (BINARY_MODE=False)
-3. Chia train/val/test: src/data_prep/split_dataset.py
-4. Tiling cho Stage 1: src/data_prep/tiling.py
-5. Crop BBox cho Stage 2: src/data_prep/crop_for_classification.py
-6. (Optional) Gộp dataset ngoài: src/data_prep/merge_external_datasets.py
-7. Train Stage 1 (YOLO): src/train_stage1_detector.py
-8. Train Stage 2 (EfficientNet): src/train_stage2_classifier.py
-9. Inference kết hợp: src/inference_2stage.py
-10. Đánh giá: src/evaluate_2stage.py
+└── results/                 # Kết quả huấn luyện & đánh giá (biểu đồ, metrics)
+    ├── Evaluate_Test/       # Kết quả đánh giá trên tập Test
+    │   ├── 1-Stage_Baseline_eval/   # Metrics & biểu đồ 1-Stage baseline
+    │   ├── 1-Stage_Tiling_eval/     # Metrics & biểu đồ 1-Stage tiling
+    │   ├── 2-Stage_FINAL/           # Metrics & confusion matrix 2-Stage FINAL
+    │   └── 2-Stage_SAHI/            # Metrics & confusion matrix 2-Stage SAHI
+    └── Train/               # Kết quả quá trình huấn luyện (logs, biểu đồ)
+        ├── 1-Stage_baseline/        # Training logs YOLO 1-Stage baseline
+        │   └── (curves, confusion_matrix, val_batch, ...)
+        ├── 1-Stage_Tiling/          # Training logs YOLO 1-Stage tiling
+        │   └── (curves, confusion_matrix, val_batch, ...)
+        ├── 2-Stage_FINAL/           # Training logs pipeline 2-Stage FINAL
+        │   ├── classifier_runs/     # EfficientNet-B2: training_curves, confusion_matrix, history
+        │   └── yolo26s_runs/stage1/ # YOLO Stage 1: curves, confusion_matrix, val_batch, ...
+        └── 2-Stage_SAHI/            # Training logs pipeline 2-Stage SAHI
+            ├── classifier_runs/     # EfficientNet-B2: training_curves, confusion_matrix, history
+            └── yolo26s_tiled_runs/stage1_tiled/ # YOLO Stage 1 tiled: curves, val_batch, ...
